@@ -4,5 +4,3 @@ __pycache__/
 *.pyc
 .venv/
 build/
-launcher.exe
-assets/launcher-256.png

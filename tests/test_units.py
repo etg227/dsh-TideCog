@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import sys
 import tempfile
 import time
 import unittest
@@ -8,7 +9,9 @@ from datetime import date, datetime
 from pathlib import Path
 
 from xiaojing.agent import WAKE_MARK, Agent, my_log_lines, paginate, parse_day, quote
-from xiaojing.config import RhythmConfig, load
+from xiaojing import secrets
+from xiaojing.app import load_system_prompt
+from xiaojing.config import ROOT, RhythmConfig, load
 from xiaojing.gate import Gate
 from xiaojing.onebot import OneBot, parse_message_event
 from xiaojing.prices import BJ, cost, is_peak
@@ -420,6 +423,31 @@ class ConfigTest(unittest.TestCase):
             self.assertEqual(cfg.rhythm.wake_time, "09:00")
             self.assertEqual(cfg.inbox.group_batch_seconds, 60)
             self.assertEqual(cfg.inbox.call_names, ["小鲸"])
+
+
+@unittest.skipUnless(sys.platform == "win32", "只有 Windows 有 DPAPI")
+class SecretsTest(unittest.TestCase):
+    def test_encrypted_roundtrip_and_merge(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            secrets.save(d, {"DEEPSEEK_API_KEY": "sk-abc", "ONEBOT_TOKEN": "t1", "OTHER": "x"})
+            self.assertNotIn(b"sk-abc", (d / "secrets.bin").read_bytes())
+            secrets.save(d, {"ONEBOT_TOKEN": "t2", "DEEPSEEK_API_KEY": ""})  # 空的不覆盖
+            self.assertEqual(secrets.load(d), {"DEEPSEEK_API_KEY": "sk-abc", "ONEBOT_TOKEN": "t2"})
+
+
+class OwnerNameTest(unittest.TestCase):
+    def test_prompt_uses_configured_name(self):
+        cfg = make_cfg(".")
+        cfg.gate.owner_name = "阿南"
+        prompt = load_system_prompt(cfg)
+        self.assertNotIn("{owner_name}", prompt)
+        self.assertIn("只有阿南私聊能叫醒你", prompt)
+        self.assertIn(f"阿南的 QQ 号是 {cfg.gate.owner_qq}", prompt)
+
+    def test_persona_has_no_personal_names(self):
+        text = (ROOT / "persona.md").read_text(encoding="utf-8")
+        self.assertIn("你是{owner_name}的朋友", text)  # 称呼从配置来，不写死名字
 
 
 if __name__ == "__main__":

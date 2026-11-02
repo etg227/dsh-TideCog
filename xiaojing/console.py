@@ -32,10 +32,8 @@ class Console:
         if req.headers.get("host") not in (f"127.0.0.1:{port}", f"localhost:{port}"):
             return json_response({"error": "只能从本机打开"}, 403)
 
-        if req.path in ("/", "/setup") and req.method == "GET":
-            # 设置页本身不带任何数据，读写都走桌面程序的接口，所以不用登录
-            name = "console.html" if req.path == "/" else "setup.html"
-            page = resources.files("xiaojing").joinpath(name).read_text(encoding="utf-8")
+        if req.path == "/" and req.method == "GET":
+            page = resources.files("xiaojing").joinpath("console.html").read_text(encoding="utf-8")
             return Response(200, page, "text/html; charset=utf-8")
 
         if req.path == "/api/login" and req.method == "POST":

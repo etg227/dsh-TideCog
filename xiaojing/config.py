@@ -1,9 +1,7 @@
-"""读取和写回 config.toml。密钥不写进这里：环境变量优先，其次是 data/secrets.bin 里加密存的。"""
+"""读取 config.toml。密钥不写进这里：环境变量优先，其次是 data/secrets.bin 里加密存的。"""
 from __future__ import annotations
 
-import json
 import os
-import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,18 +10,9 @@ from . import secrets
 
 
 def _root() -> Path:
-    """项目文件夹：config.toml、人设、data/ 都在这。
-
-    打包成 exe 后：exe 旁边有 config.toml 就用 exe 所在的文件夹（自己打包、放在项目里的情况）；
-    没有就用 %APPDATA%\\xiaojing（从 Release 下载、随便放哪的情况），不往桌面上乱撒文件。
-    """
+    """项目文件夹：config.toml、人设、data/ 都在这。设了 XIAOJING_ROOT 就用它（测试和别处部署用）。"""
     if override := os.environ.get("XIAOJING_ROOT"):
         return Path(override).resolve()
-    if getattr(sys, "frozen", False):
-        exe_dir = Path(sys.executable).resolve().parent
-        if (exe_dir / "config.toml").exists():
-            return exe_dir
-        return Path(os.environ.get("APPDATA", exe_dir)) / "xiaojing"
     return Path(__file__).resolve().parent.parent
 
 
@@ -137,32 +126,3 @@ def load(path: Path | None = None, env: dict | None = None) -> Config:
         rhythm=RhythmConfig(**raw.get("rhythm", {})),
         context_budget=int(raw.get("context_budget", 64000)),
     )  # 第 1 步的 max_turns 已经不用了，旧配置里留着也没关系
-
-
-def _toml(value) -> str:
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, (int, float)):
-        return repr(value)
-    return json.dumps(value, ensure_ascii=False)  # 字符串和字符串列表：JSON 的写法 TOML 也认
-
-
-def dump(cfg: Config) -> str:
-    """把配置写回 TOML（设置页保存时用）。密钥不写。"""
-    data_dir = "data" if cfg.data_dir == ROOT / "data" else str(cfg.data_dir)
-    sections = {
-        "onebot": (cfg.onebot, ("api_url", "listen_host", "listen_port")),
-        "llm": (cfg.llm, ("base_url", "model", "timeout", "max_steps", "price_hit", "price_miss", "price_out",
-                          "peak_multiplier")),
-        "gate": (cfg.gate, ("owner_qq", "owner_name", "allow_groups", "allow_users", "per_conv_per_minute",
-                            "global_per_minute", "max_text_len")),
-        "console": (cfg.console, ("host", "port")),
-        "inbox": (cfg.inbox, ("group_batch_seconds", "group_quiet_factor", "group_quiet_min",
-                              "group_min_interval", "call_names")),
-        "rhythm": (cfg.rhythm, ("heartbeat_default", "heartbeat_min", "heartbeat_max", "sleep_start", "wake_time")),
-    }
-    lines = ["# 由 launcher 的设置页保存。可以手改，改完重启生效；密钥不在这里。", "",
-             f"data_dir = {_toml(data_dir)}", f"context_budget = {_toml(cfg.context_budget)}"]
-    for name, (obj, keys) in sections.items():
-        lines += ["", f"[{name}]"] + [f"{k} = {_toml(getattr(obj, k))}" for k in keys]
-    return "\n".join(lines) + "\n"
