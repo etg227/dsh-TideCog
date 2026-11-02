@@ -35,7 +35,7 @@ def _fn(name, description, properties=None, required=()):
 CONV = {"type": "string", "description": "会话，比如 group:123456 或 private:123456"}
 TOOLS = [
     _fn("inbox", "看收件箱：哪些对话有未读、几条、有没有人 @ 你。只给数量，不给内容。"),
-    _fn("open", "打开一个对话，看最近的消息，顺便标成已读。往一个对话发消息之前，这一圈里必须先打开它。",
+    _fn("open", "打开一个对话，优先看积压未读，只标记这次返回的消息。往一个对话发消息之前，这一圈里必须先打开它。",
         {"conv": CONV, "n": {"type": "integer", "description": "看最近几条，默认 20，最多 50"}}, ["conv"]),
     _fn("scroll", "在一个对话里往上翻更早的消息。before 填你看到的最早那条的编号（# 后面的数字）。",
         {"conv": CONV, "before": {"type": "integer"}, "n": {"type": "integer", "description": "默认 20，最多 50"}},
@@ -46,6 +46,7 @@ TOOLS = [
         {"conv": CONV, "text": {"type": "string", "description": "要发的话，纯文本"}}, ["conv", "text"]),
     _fn("my_log", "翻你自己以前某一天想了什么、做了什么（包括已经移出上下文的部分）。",
         {"day": {"type": "string", "description": "今天、昨天，或者 11-02 这种日期"},
+         "before": {"type": "integer", "description": "继续往前翻时传上页返回的 before，日期和关键词保持一致"},
          "keyword": {"type": "string", "description": "只看包含这个词的"}}, ["day"]),
     _fn("rest", "这一圈到此为止，过多少分钟再醒。什么都不想做的时候就调它。",
         {"minutes": {"type": "integer", "description": "几分钟后再醒"}}, ["minutes"]),
@@ -75,6 +76,25 @@ class Agent:
         self._turn_end = False
         self._rest_until: float | None = None
         self._sent_this_turn = 0
+        saved = store.state("scheduler", {})
+        allowed = set(self.allowed_convs())
+        self.pending.update({c: r for c, r in saved.get("pending", {}).items() if c in allowed})
+        self.group_due.update({c: t for c, t in saved.get("group_due", {}).items() if c in allowed})
+        self._last_group_wake.update(saved.get("last_group_wake", {}))
+        self.next_heartbeat = saved.get("next_heartbeat", self.next_heartbeat)
+        self.rhythm.sleep_until = saved.get("sleep_until", 0)
+        self.idle_streak = saved.get("idle_streak", 0)
+        self._was_sleeping = self.rhythm.sleeping(time.time())
+        self._inflight = {}
+        if self.pending or self.group_due:
+            self._wake.set()
+
+    def _checkpoint(self):
+        self.store.set_state("scheduler", {
+            "pending": {**self._inflight, **self.pending}, "group_due": self.group_due,
+            "last_group_wake": self._last_group_wake, "next_heartbeat": self.next_heartbeat,
+            "sleep_until": self.rhythm.sleep_until, "idle_streak": self.idle_streak,
+        })
 
     @property
     def owner_conv(self) -> str:
@@ -90,6 +110,7 @@ class Agent:
         old = self.pending.get(conv)
         self.pending[conv] = reason if not old or reason in old else f"{old}；{reason}"
         self.group_due.pop(conv, None)
+        self._checkpoint()
         self._wake.set()
 
     def note_group(self, conv: str, now: float | None = None):
@@ -100,6 +121,7 @@ class Agent:
         ib = self.cfg.inbox
         self.group_due[conv] = max(now + ib.group_batch_seconds,
                                    self._last_group_wake.get(conv, 0) + ib.group_min_interval)
+        self._checkpoint()
         self._wake.set()
 
     def nudge(self):
@@ -144,6 +166,10 @@ class Agent:
 
     async def run(self):
         while True:
+            if self.gate.paused:
+                await self._wake.wait()
+                self._wake.clear()
+                continue
             try:
                 await asyncio.wait_for(self._wake.wait(), self._seconds_until_due(time.time()))
             except asyncio.TimeoutError:
@@ -154,9 +180,13 @@ class Agent:
             batch, kind = self._take_ready(time.time())
             if kind is None:
                 continue
+            self._inflight = batch
+            self._checkpoint()
             self.running = True
             try:
                 await self.turn(batch, kind)
+                self._inflight = {}
+                self._checkpoint()
             except Exception as e:
                 log.exception("这一圈出错了")
                 self.store.add_feed("error", f"这一圈出错了：{e}")
@@ -278,13 +308,12 @@ class Agent:
         if err := self.gate.check_open(conv):
             self.store.add_feed("blocked", f"open {conv}：{err}", conv)
             return f"打不开：{err}"
-        rows = self.store.recent(conv, self._int(args.get("n"), 20, 1, 50))
-        self.store.mark_read(conv)
+        rows = self.store.open_page(conv, self._int(args.get("n"), 20, 1, 50))
         self.gate.mark_opened(conv)
         self.store.add_feed("tool", f"open {conv}（{len(rows)} 条）", conv)
         if not rows:
             return f"{conv} 里还没有消息"
-        return "\n".join([f"{conv} 最近 {len(rows)} 条："] + self._format_rows(rows))
+        return "\n".join([f"{conv} 本页 {len(rows)} 条："] + self._format_rows(rows))
 
     def _tool_scroll(self, args: dict) -> str:
         conv = str(args.get("conv", "")).strip()
@@ -359,9 +388,10 @@ class Agent:
         if not lines:
             return f"{day:%m-%d} 没有记录" + (f"（含「{keyword}」的）" if keyword else "")
         text = "\n".join(lines)
-        if len(text) > MY_LOG_MAX_CHARS:  # 太长就留最后的部分
-            text = "……（更早的省略了）\n" + text[-MY_LOG_MAX_CHARS:]
-        return text
+        end = self._int(args.get("before"), len(text), 0, len(text))
+        start = max(0, end - MY_LOG_MAX_CHARS)
+        page = text[start:end]
+        return f"【更早一页：before={start}】\n{page}" if start else page or "已经到开头了"
 
     # ── 会话存盘 ──────────────────────────────────────
     def _load(self) -> list[dict]:

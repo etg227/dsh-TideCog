@@ -76,9 +76,9 @@ class OneBot:
         self.nickname = (data or {}).get("nickname", self.nickname)
 
     def verify(self, body: bytes, signature: str) -> bool:
-        """校验上报签名（X-Signature: sha1=...）。没配 secret 就不校验。"""
+        """校验上报签名（X-Signature: sha1=...）。没有配置 secret 时拒绝上报。"""
         if not self.cfg.secret:
-            return True
+            return False
         expected = "sha1=" + hmac.new(self.cfg.secret.encode(), body, hashlib.sha1).hexdigest()
         return hmac.compare_digest(expected, signature or "")
 

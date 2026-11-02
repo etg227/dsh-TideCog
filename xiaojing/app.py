@@ -41,6 +41,7 @@ class App:
         self.store = Store(cfg.data_dir / "events.db")
         self.onebot = OneBot(cfg.onebot)
         self.gate = Gate(cfg.gate)
+        self.gate.paused = self.store.state("paused", False)
         self.agent = Agent(cfg, self.store, self.onebot, self.gate, llm or DeepSeek(cfg.llm),
                            system_prompt if system_prompt is not None else load_system_prompt(cfg))
         self.receiver = Server(cfg.onebot.listen_host, cfg.onebot.listen_port, self.on_onebot)
@@ -79,6 +80,7 @@ class App:
     def set_paused(self, paused: bool, by: str):
         if self.gate.paused == paused:
             return
+        self.store.set_state("paused", paused)
         self.gate.paused = paused
         self.store.add_feed("info", f"{'已暂停' if paused else '继续运转'}（{by}）")
         if not paused:
@@ -103,13 +105,13 @@ class App:
 
     async def handle_message(self, m: dict):
         conv = m["conv"]
-        self.store.add_event(conv, m["text"], ts=m["ts"], sender_id=m["sender_id"],
+        event_id = self.store.add_event(conv, m["text"], ts=m["ts"], sender_id=m["sender_id"],
                              sender_name=m["sender_name"], msg_id=m["msg_id"],
                              mentions_me=m["mentions_me"], raw=m["raw"])
         owner = self.cfg.gate.owner_qq
         if owner and conv == f"private:{owner}" and m["text"] in OWNER_COMMANDS:
             paused = OWNER_COMMANDS[m["text"]]
-            self.store.mark_read(conv)  # 指令是给系统的，不算她的未读
+            self.store.mark_seen([event_id])  # 只确认这条系统指令
             self.set_paused(paused, f"{self.cfg.gate.owner_name}私聊")
             try:  # 这是系统回执，不经过她，也不受闸门限制
                 await self.onebot.send_text(conv, "已暂停。私聊发「继续」恢复。" if paused else "继续了。")

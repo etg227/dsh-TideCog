@@ -42,13 +42,15 @@ def missing(cfg: Config) -> list[str]:
         out.append("DeepSeek API key")
     if not cfg.onebot.token:
         out.append("OneBot 的 HTTP token")
+    if not cfg.onebot.secret:
+        out.append("OneBot 上报签名密钥")
     return out
 
 
 def parse_ids(text: str) -> list[str]:
     """从"123, 456 789"这种写法里挑出 QQ 号 / 群号，去重保序。"""
     seen = []
-    for x in re.findall(r"\d{5,12}", str(text or "")):
+    for x in re.findall(r"(?<!\d)[0-9]{5,12}(?!\d)", str(text or "")):
         if x not in seen:
             seen.append(x)
     return seen
@@ -77,15 +79,15 @@ def apply(cfg: Config, values: dict) -> tuple[Config, dict, dict]:
     """检查设置页填的内容。返回 (新配置, 要存的密钥, 每个字段的错误)；有错误时前两个不要用。"""
     errors = {}
     new = deepcopy(cfg)
-    owner = parse_ids(values.get("owner_qq", ""))
-    if len(owner) != 1:
+    owner = str(values.get("owner_qq", "")).strip()
+    if not re.fullmatch(r"[0-9]{5,12}", owner):
         errors["owner_qq"] = "填一个 QQ 号（5 到 12 位数字）"
     else:
-        new.gate.owner_qq = owner[0]
+        new.gate.owner_qq = owner
     new.gate.owner_name = str(values.get("owner_name", "")).strip()[:20] or "主人"
     new.gate.allow_groups = parse_ids(values.get("allow_groups", ""))
     users = parse_ids(values.get("allow_users", ""))
-    new.gate.allow_users = ([new.gate.owner_qq] if owner else []) + [u for u in users if u not in owner]
+    new.gate.allow_users = ([new.gate.owner_qq] if owner else []) + [u for u in users if u != owner]
     api_url = str(values.get("api_url", "")).strip().rstrip("/")
     if not re.fullmatch(r"https?://[\w.\-]+(:\d{1,5})?(/[\w.\-/]*)?", api_url):
         errors["api_url"] = "填 OneBot HTTP 服务器的地址，比如 http://127.0.0.1:3020"
@@ -100,6 +102,8 @@ def apply(cfg: Config, values: dict) -> tuple[Config, dict, dict]:
         errors["api_key"] = "还没有 DeepSeek API key"
     if not saved["ONEBOT_TOKEN"] and not cfg.onebot.token:
         errors["token"] = "还没有 OneBot HTTP 服务器的 token"
+    if not saved["ONEBOT_SECRET"] and not cfg.onebot.secret:
+        errors["secret"] = "请填写与 OneBot 上报端一致的签名密钥"
     return new, saved, errors
 
 

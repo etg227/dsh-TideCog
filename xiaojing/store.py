@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS events_conv ON events(conv, id);
 CREATE TABLE IF NOT EXISTS reads (conv TEXT PRIMARY KEY, last_id INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS runtime_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS seen_events (event_id INTEGER PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS usage (
   id INTEGER PRIMARY KEY, ts REAL NOT NULL, model TEXT,
   hit INTEGER NOT NULL, miss INTEGER NOT NULL, out INTEGER NOT NULL,
@@ -74,10 +76,34 @@ class Store:
         ).fetchall()
         return rows[::-1]
 
+    def state(self, key, default):
+        row = self.db.execute("SELECT value FROM runtime_state WHERE key=?", (key,)).fetchone()
+        return json.loads(row[0]) if row else default
+
+    def set_state(self, key, value):
+        with self.db:
+            self.db.execute("INSERT OR REPLACE INTO runtime_state VALUES (?,?)", (key, json.dumps(value)))
+
+    def mark_seen(self, ids):
+        with self.db:
+            self.db.executemany("INSERT OR IGNORE INTO seen_events VALUES (?)", ((i,) for i in ids))
+
+    def open_page(self, conv, n):
+        # Preserve legacy read cursors. When a backlog spans pages, start with the oldest unread.
+        recent = self.recent(conv, n)
+        unread = self.db.execute(
+            "SELECT * FROM events WHERE conv=? AND id>? AND mine=0 "
+            "AND id NOT IN (SELECT event_id FROM seen_events) ORDER BY id LIMIT ?",
+            (conv, self._last_read(conv), n),
+        ).fetchall()
+        rows = unread if unread and unread[0]["id"] < recent[0]["id"] else recent
+        self.mark_seen(row["id"] for row in rows if not row["mine"])
+        return rows
+
     def unread(self, conv) -> int:
         last = self._last_read(conv)
         return self.db.execute(
-            "SELECT COUNT(*) FROM events WHERE conv = ? AND id > ? AND mine = 0", (conv, last)
+            "SELECT COUNT(*) FROM events WHERE conv = ? AND id > ? AND mine = 0 AND id NOT IN (SELECT event_id FROM seen_events)", (conv, last)
         ).fetchone()[0]
 
     def mark_read(self, conv):
@@ -105,7 +131,7 @@ class Store:
         out = []
         for conv in convs:
             row = self.db.execute(
-                "SELECT COUNT(*), MAX(ts), MAX(mentions_me) FROM events WHERE conv = ? AND id > ? AND mine = 0",
+                "SELECT COUNT(*), MAX(ts), MAX(mentions_me) FROM events WHERE conv = ? AND id > ? AND mine = 0 AND id NOT IN (SELECT event_id FROM seen_events)",
                 (conv, self._last_read(conv)),
             ).fetchone()
             if row[0]:
