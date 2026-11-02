@@ -32,8 +32,12 @@ host = "127.0.0.1"
 port = 5310
 
 [inbox]
-group_batch_seconds = 30   # 群里没 @ 她的消息，攒多少秒再叫醒她
+# 群里没人叫她的消息先攒着：等大家说完一段（出现停顿）再叫醒她，最多等 group_batch_seconds 秒
+group_batch_seconds = 60   # 从第一条未读算，最多攒多少秒
+group_quiet_factor = 3     # 停顿超过这个群平常发言间隔的几倍，算一段话说完了
+group_quiet_min = 8        # 停顿至少多少秒才算
 group_min_interval = 180   # 同一个群，普通消息最快多少秒叫醒她一次
+call_names = ["小鲸"]      # 群里 @ 她、回复她的消息、或者喊这些名字，都马上叫醒她
 
 [rhythm]
 heartbeat_default = 30     # 她没说下次几分钟醒，就按这个（分钟）

@@ -8,10 +8,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import re
 import time
+from collections import deque
 from datetime import datetime, timedelta
 from pathlib import Path
+from statistics import median
 
 from .gate import Gate
 from .llm import LLMError
@@ -22,7 +25,9 @@ from .rhythm import Rhythm
 log = logging.getLogger(__name__)
 
 WAKE_MARK = "【唤醒"
-MY_LOG_MAX_CHARS = 4000
+MY_LOG_MAX_CHARS = 4000  # my_log 一页最多多少字
+SEARCH_PAGE = 15         # search 一页几条
+SEARCH_SCAN = 300        # search 最多数到多少条
 
 
 def _fn(name, description, properties=None, required=()):
@@ -40,13 +45,15 @@ TOOLS = [
     _fn("scroll", "在一个对话里往上翻更早的消息。before 填你看到的最早那条的编号（# 后面的数字）。",
         {"conv": CONV, "before": {"type": "integer"}, "n": {"type": "integer", "description": "默认 20，最多 50"}},
         ["conv", "before"]),
-    _fn("search", "在聊天记录里搜关键词。三个字以上搜得最准。",
-        {"query": {"type": "string"}, "conv": {**CONV, "description": "只搜这个会话；不填就搜全部"}}, ["query"]),
+    _fn("search", "在聊天记录里搜关键词，新的在前，一页 15 条。三个字以上搜得最准。",
+        {"query": {"type": "string"}, "conv": {**CONV, "description": "只搜这个会话；不填就搜全部"},
+         "page": {"type": "integer", "description": "第几页，默认第 1 页（最新的）"}}, ["query"]),
     _fn("send", "往一个对话发一条 QQ 消息。只发你真想说出口的话；不想回可以不发。",
         {"conv": CONV, "text": {"type": "string", "description": "要发的话，纯文本"}}, ["conv", "text"]),
-    _fn("my_log", "翻你自己以前某一天想了什么、做了什么（包括已经移出上下文的部分）。",
+    _fn("my_log", "翻你自己以前某一天想了什么、做了什么（包括已经移出上下文的部分）。一天太长会分页，默认给最新一页。",
         {"day": {"type": "string", "description": "今天、昨天，或者 11-02 这种日期"},
-         "keyword": {"type": "string", "description": "只看包含这个词的"}}, ["day"]),
+         "keyword": {"type": "string", "description": "只看包含这个词的"},
+         "page": {"type": "integer", "description": "第几页，从当天最早的算起；不填就是最后一页"}}, ["day"]),
     _fn("rest", "这一圈到此为止，过多少分钟再醒。什么都不想做的时候就调它。",
         {"minutes": {"type": "integer", "description": "几分钟后再醒"}}, ["minutes"]),
     _fn("sleep", "去睡觉，到早上起床时间再醒。睡着时只有{owner_name}私聊能叫醒你。"),
@@ -64,6 +71,8 @@ class Agent:
         self.history: list[dict] = self._load()
         self.pending: dict[str, str] = {}      # 会话 -> 为什么叫醒她（马上要处理的）
         self.group_due: dict[str, float] = {}  # 群 -> 攒够了、该叫醒她的时间
+        self._batch_start: dict[str, float] = {}         # 群 -> 这一批第一条未读什么时候到的
+        self._group_times: dict[str, deque] = {}         # 群 -> 最近几条消息的到达时间，估这个群平常多久说一句
         self._last_group_wake: dict[str, float] = {}
         self.next_heartbeat = time.time() + cfg.rhythm.heartbeat_default * 60
         self.idle_streak = 0                   # 连着几圈没说话
@@ -90,16 +99,28 @@ class Agent:
         old = self.pending.get(conv)
         self.pending[conv] = reason if not old or reason in old else f"{old}；{reason}"
         self.group_due.pop(conv, None)
+        self._batch_start.pop(conv, None)
         self._wake.set()
 
     def note_group(self, conv: str, now: float | None = None):
-        """群里来了没 @ 她的消息：先攒着，到点再叫醒，同一个群不叫得太勤。"""
+        """群里来了没人叫她的消息：等大家说完一段再叫醒她，同一个群不叫得太勤。
+
+        话轮转换：没被点名的人，等别人一段话说完、出现停顿才插话。停顿按这个群自己的节奏算：
+        最近几条的发言间隔取中位数，停得比它的几倍还久，就算说完了。一直有人说话就等不到停顿，
+        所以从第一条未读算起最多攒 group_batch_seconds 秒。
+        """
         now = time.time() if now is None else now
-        if conv in self.pending or conv in self.group_due:
+        times = self._group_times.setdefault(conv, deque(maxlen=11))
+        times.append(now)
+        if conv in self.pending:
             return
         ib = self.cfg.inbox
-        self.group_due[conv] = max(now + ib.group_batch_seconds,
-                                   self._last_group_wake.get(conv, 0) + ib.group_min_interval)
+        start = self._batch_start.setdefault(conv, now)
+        t = list(times)
+        gaps = [b - a for a, b in zip(t, t[1:])]
+        quiet = ib.group_quiet_factor * median(gaps) if len(gaps) >= 3 else ib.group_batch_seconds
+        due = min(now + max(quiet, ib.group_quiet_min), start + ib.group_batch_seconds)
+        self.group_due[conv] = max(due, self._last_group_wake.get(conv, 0) + ib.group_min_interval)
         self._wake.set()
 
     def nudge(self):
@@ -111,6 +132,7 @@ class Agent:
         for conv, due in list(self.group_due.items()):
             if now >= due:
                 del self.group_due[conv]
+                self._batch_start.pop(conv, None)
                 self._last_group_wake[conv] = now
                 self.pending.setdefault(conv, "群里有新消息")
         sleeping = self.rhythm.sleeping(now)
@@ -257,11 +279,16 @@ class Agent:
         except (TypeError, ValueError):
             return default
 
-    def _format_rows(self, rows) -> list[str]:
+    def _format_rows(self, rows, with_conv=False) -> list[str]:
+        """别人说的话和群名片都放进 ⟦ ⟧（spotlighting），她一眼分得清哪些是资料、哪些是规矩。"""
         out = []
         for r in rows:
-            who = "我" if r["mine"] else f"{r['sender_name']}({r['sender_id']})"
-            out.append(f"[#{r['id']} {bj_time(r['ts'])}] {who}：{r['text']}")
+            if r["mine"]:
+                who, text = "我", r["text"]
+            else:
+                who, text = f"{quote(r['sender_name'][:30])}({r['sender_id']})", quote(r["text"])
+            where = f" {r['conv']}" if with_conv else ""
+            out.append(f"[#{r['id']} {bj_time(r['ts'])}]{where} {who}：{text}")
         return out
 
     def _tool_inbox(self, args: dict) -> str:
@@ -271,7 +298,7 @@ class Agent:
             return "收件箱是空的"
         return "\n".join(
             f"- {x['conv']}：{x['unread']} 条未读，最新 {bj_time(x['last_ts'])}（{x['last_sender']}）"
-            + ("，有人 @ 你" if x["mentioned"] else "") for x in items)
+            + ("，有人叫你" if x["mentioned"] else "") for x in items)
 
     def _tool_open(self, args: dict) -> str:
         conv = str(args.get("conv", "")).strip()
@@ -279,12 +306,16 @@ class Agent:
             self.store.add_feed("blocked", f"open {conv}：{err}", conv)
             return f"打不开：{err}"
         rows = self.store.recent(conv, self._int(args.get("n"), 20, 1, 50))
+        hidden = self.store.unread(conv, before_id=rows[0]["id"]) if rows else 0
         self.store.mark_read(conv)
         self.gate.mark_opened(conv)
         self.store.add_feed("tool", f"open {conv}（{len(rows)} 条）", conv)
         if not rows:
             return f"{conv} 里还没有消息"
-        return "\n".join([f"{conv} 最近 {len(rows)} 条："] + self._format_rows(rows))
+        lines = [f"{conv} 最近 {len(rows)} 条："] + self._format_rows(rows)
+        if hidden:
+            lines.append(f"（这些之前还有 {hidden} 条你没看过，也一起标成已读了。想看就 scroll，before 填 {rows[0]['id']}）")
+        return "\n".join(lines)
 
     def _tool_scroll(self, args: dict) -> str:
         conv = str(args.get("conv", "")).strip()
@@ -303,15 +334,18 @@ class Agent:
         if conv and (err := self.gate.check_open(conv)):
             return f"搜不了：{err}"
         allowed = set(self.allowed_convs())
-        rows = [r for r in self.store.search(query, conv, limit=50) if r["conv"] in allowed][:15]
-        self.store.add_feed("tool", f"search「{query}」（{len(rows)} 条）", conv)
+        found = self.store.search(query, conv, limit=SEARCH_SCAN)
+        rows = [r for r in found if r["conv"] in allowed]
+        pages = max(1, math.ceil(len(rows) / SEARCH_PAGE))
+        page = self._int(args.get("page"), 1, 1, pages)
+        shown = rows[(page - 1) * SEARCH_PAGE:page * SEARCH_PAGE]
+        self.store.add_feed("tool", f"search「{query}」（{len(rows)} 条，第 {page} 页）", conv)
         if not rows:
             return f"没搜到「{query}」"
-        lines = []
-        for r in rows:
-            who = "我" if r["mine"] else r["sender_name"]
-            lines.append(f"[#{r['id']} {bj_time(r['ts'])}] {r['conv']} {who}：{r['text']}")
-        return "\n".join(lines)
+        head = f"搜到{'至少' if len(found) >= SEARCH_SCAN else ''} {len(rows)} 条「{query}」，新的在前"
+        if pages > 1:
+            head += f"，这是第 {page}/{pages} 页" + (f"，更早的用 page={page + 1}" if page < pages else "")
+        return "\n".join([head + "："] + self._format_rows(shown, with_conv=True))
 
     async def _tool_send(self, args: dict) -> str:
         conv = str(args.get("conv", "")).strip()
@@ -354,14 +388,18 @@ class Agent:
         if day is None:
             return "日期看不懂，写今天、昨天，或者 11-02 这种"
         keyword = str(args.get("keyword", "")).strip()
-        lines = my_log_lines(self.archive_path, day, keyword)
-        self.store.add_feed("tool", f"my_log {day:%m-%d}" + (f"「{keyword}」" if keyword else ""))
-        if not lines:
+        pages = paginate(my_log_lines(self.archive_path, day, keyword), MY_LOG_MAX_CHARS)
+        n = len(pages)
+        page = self._int(args.get("page"), n, 1, n) if n else 0
+        self.store.add_feed("tool", f"my_log {day:%m-%d}" + (f"「{keyword}」" if keyword else "") + f" 第 {page}/{n} 页")
+        if not n:
             return f"{day:%m-%d} 没有记录" + (f"（含「{keyword}」的）" if keyword else "")
-        text = "\n".join(lines)
-        if len(text) > MY_LOG_MAX_CHARS:  # 太长就留最后的部分
-            text = "……（更早的省略了）\n" + text[-MY_LOG_MAX_CHARS:]
-        return text
+        if n == 1:
+            head = f"{day:%m-%d} 的记录："
+        else:
+            hints = ([f"更早的用 page={page - 1}"] if page > 1 else []) + ([f"更晚的用 page={page + 1}"] if page < n else [])
+            head = f"{day:%m-%d} 共 {n} 页，这是第 {page} 页{'（最新的）' if page == n else ''}。{'，'.join(hints)}："
+        return "\n".join([head] + pages[page - 1])
 
     # ── 会话存盘 ──────────────────────────────────────
     def _load(self) -> list[dict]:
@@ -400,11 +438,39 @@ class Agent:
         else:
             return
         self.history = self.history[i:]
+        # 在断口留一句话，让她知道前面少了一截、去哪翻（像 MemGPT 那样，只是不做总结）
+        first = self.history[0]
+        head, _, rest = first["content"].partition("\n")
+        since = head[len(WAKE_MARK):].split("】")[0].strip()
+        note = f"（更早的内容已经移出上下文，没有总结，原文都在存档里。{since} 之前想过、做过什么，用 my_log 按日期翻。）"
+        self.history[0] = {**first, "content": "\n".join([head, note] + ([rest] if rest else []))}
         tmp = self.session_path.with_suffix(".tmp")
         tmp.write_text("".join(json.dumps(m, ensure_ascii=False) + "\n" for m in self.history), encoding="utf-8")
         tmp.replace(self.session_path)
         self.store.add_feed("info", f"上下文到了 {self.last_prompt_tokens} token：移出最旧的 {drop} 圈，存档里还在")
         self.last_prompt_tokens = 0
+
+
+def quote(text: str) -> str:
+    """把别人的原话放进 ⟦ ⟧。换行换成 ↵，免得一条消息里伪造出好几条；原话里的 ⟦ ⟧ 换成普通方括号，免得提前收尾。"""
+    text = text.replace("⟦", "[").replace("⟧", "]").replace("\r", "")
+    return "⟦" + text.replace("\n", " ↵ ") + "⟧"
+
+
+def paginate(lines: list[str], max_chars: int) -> list[list[str]]:
+    """按整行切页，每页不超过 max_chars 字；单独一行太长就截掉尾巴。页码从最早的算起，后来追加的只会让最后一页变长。"""
+    pages, cur, size = [], [], 0
+    for line in lines:
+        if len(line) > max_chars:
+            line = line[:max_chars - 1] + "…"
+        if cur and size + len(line) + 1 > max_chars:
+            pages.append(cur)
+            cur, size = [], 0
+        cur.append(line)
+        size += len(line) + 1
+    if cur:
+        pages.append(cur)
+    return pages
 
 
 def parse_day(text: str, now: float):

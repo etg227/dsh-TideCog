@@ -12,6 +12,7 @@ import urllib.request
 
 CQ_AT = re.compile(r"\[CQ:at,qq=(\d+|all)[^\]]*\]")
 CQ_ANY = re.compile(r"\[CQ:([a-z_]+)[^\]]*\]")
+CQ_REPLY = re.compile(r"\[CQ:reply,(?:[^\]]*,)?id=(-?\d+)")
 SEGMENT_LABELS = {"face": "[表情]", "image": "[图片]", "record": "[语音]", "video": "[视频]",
                   "reply": "[回复]", "forward": "[合并转发]", "file": "[文件]", "mface": "[表情]"}
 
@@ -102,6 +103,7 @@ def parse_message_event(evt: dict) -> dict | None:
     self_id = str(evt.get("self_id", ""))
     msg = evt.get("message")
     mentions = False
+    reply_to = ""
     if isinstance(msg, list):
         parts = []
         for seg in msg:
@@ -113,11 +115,15 @@ def parse_message_event(evt: dict) -> dict | None:
                 mentions = mentions or qq == self_id
                 parts.append("@全体成员" if qq == "all" else f"@{data.get('name') or qq}")
             else:
+                if kind == "reply":
+                    reply_to = reply_to or str(data.get("id", ""))
                 parts.append(SEGMENT_LABELS.get(kind, f"[{kind}]"))
         text = "".join(parts)
     else:
         raw = str(msg if msg is not None else evt.get("raw_message", ""))
         mentions = self_id in CQ_AT.findall(raw)
+        if m := CQ_REPLY.search(raw):
+            reply_to = m.group(1)
         text = CQ_AT.sub(lambda m: "@全体成员" if m.group(1) == "all" else f"@{m.group(1)}", raw)
         text = CQ_ANY.sub(lambda m: SEGMENT_LABELS.get(m.group(1), f"[{m.group(1)}]"), text)
         text = _unescape_cq(text)
@@ -131,6 +137,7 @@ def parse_message_event(evt: dict) -> dict | None:
         "sender_name": sender.get("card") or sender.get("nickname") or str(evt.get("user_id", "")),
         "msg_id": str(evt.get("message_id", "")),
         "mentions_me": mentions,
+        "reply_to": reply_to,  # 回复的是哪条消息（QQ 的消息编号），没回复就是空
         "self_id": self_id,
         "raw": evt,
     }

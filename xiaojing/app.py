@@ -101,11 +101,30 @@ class App:
             await self.handle_message(m)
         return Response(204)
 
+    def _call_reason(self, m: dict, reply) -> str:
+        """这条消息是不是在叫她（受话人识别）：私聊、@ 她、回复她的消息、喊她名字。不是就返回空。"""
+        if m["conv"].startswith("private:"):
+            return "私聊"
+        if m["mentions_me"]:
+            return "有人 @ 你"
+        if reply is not None and reply["mine"]:
+            return "有人回复你"
+        if any(n and n in m["text"] for n in self.cfg.inbox.call_names):
+            return "有人叫你名字"
+        return ""
+
     async def handle_message(self, m: dict):
         conv = m["conv"]
-        self.store.add_event(conv, m["text"], ts=m["ts"], sender_id=m["sender_id"],
+        reply = self.store.by_msg_id(conv, m["reply_to"])
+        reason = self._call_reason(m, reply)
+        text = m["text"]
+        if reply is not None:  # 把"[回复]"换成回复的是谁、哪句话，她不用翻也看得懂
+            quoted = " ".join(reply["text"].split())
+            quoted = quoted[:20] + "…" if len(quoted) > 20 else quoted
+            text = text.replace("[回复]", f"[回复 {'我' if reply['mine'] else reply['sender_name']}：{quoted}]", 1)
+        self.store.add_event(conv, text, ts=m["ts"], sender_id=m["sender_id"],
                              sender_name=m["sender_name"], msg_id=m["msg_id"],
-                             mentions_me=m["mentions_me"], raw=m["raw"])
+                             mentions_me=bool(reason) and conv.startswith("group:"), raw=m["raw"])
         owner = self.cfg.gate.owner_qq
         if owner and conv == f"private:{owner}" and m["text"] in OWNER_COMMANDS:
             paused = OWNER_COMMANDS[m["text"]]
@@ -118,10 +137,8 @@ class App:
             return
         if not self.gate.allowed(conv):
             return
-        if conv.startswith("private:"):
-            self.agent.wake(conv, "私聊")
-        elif m["mentions_me"]:
-            self.agent.wake(conv, "有人 @ 你")
+        if reason:
+            self.agent.wake(conv, reason)
         else:
             self.agent.note_group(conv)
 

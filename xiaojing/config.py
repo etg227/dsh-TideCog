@@ -72,8 +72,11 @@ class ConsoleConfig:
 
 @dataclass
 class InboxConfig:
-    group_batch_seconds: float = 30   # 群里没 @ 她的消息，攒多久再叫醒她
+    group_batch_seconds: float = 60   # 群里没人叫她的消息，最多攒多久就叫醒她（从第一条未读算）
+    group_quiet_factor: float = 3     # 停顿超过这个群平常发言间隔的几倍，算一段话说完了，提前叫醒
+    group_quiet_min: float = 8        # 停顿至少要这么多秒才算
     group_min_interval: float = 180   # 同一个群，普通消息最快多久叫醒她一次
+    call_names: list[str] = field(default_factory=lambda: ["小鲸"])  # 群里喊这些名字也算叫她
 
 
 @dataclass
@@ -154,7 +157,8 @@ def dump(cfg: Config) -> str:
         "gate": (cfg.gate, ("owner_qq", "owner_name", "allow_groups", "allow_users", "per_conv_per_minute",
                             "global_per_minute", "max_text_len")),
         "console": (cfg.console, ("host", "port")),
-        "inbox": (cfg.inbox, ("group_batch_seconds", "group_min_interval")),
+        "inbox": (cfg.inbox, ("group_batch_seconds", "group_quiet_factor", "group_quiet_min",
+                              "group_min_interval", "call_names")),
         "rhythm": (cfg.rhythm, ("heartbeat_default", "heartbeat_min", "heartbeat_max", "sleep_start", "wake_time")),
     }
     lines = ["# 由 launcher 的设置页保存。可以手改，改完重启生效；密钥不在这里。", "",

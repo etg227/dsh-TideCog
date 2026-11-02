@@ -79,6 +79,24 @@ class EndToEndTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn(f"group:{GROUP}：2 条未读（群里有新消息）", self.llm.seen[0][1]["content"])
         self.assertEqual(self.qq.sends(), [])
 
+    async def test_reply_to_her_or_her_name_wakes_her(self):
+        self.app.store.add_event(f"group:{GROUP}", "在呢在呢", mine=True, msg_id="77")
+        self.app.store.mark_read(f"group:{GROUP}")
+        self.llm.script = [{"content": "", "tool_calls": [tool_call("r", "rest", minutes=30)]}]
+        self.app.cfg.inbox.group_batch_seconds = 30  # 不算叫她的话，要攒很久才醒
+        evt = group_event(at_me=False)
+        evt["message"] = [{"type": "reply", "data": {"id": "77"}}, {"type": "text", "data": {"text": "真的吗"}}]
+        await self.post(evt)
+        self.assertTrue(await wait_for(lambda: self.llm.seen, timeout=2))
+        await wait_for(lambda: not self.app.agent.running)
+        self.assertIn("（有人回复你）", self.llm.seen[0][1]["content"])
+        self.assertEqual(self.app.store.recent(f"group:{GROUP}", 1)[0]["text"], "[回复 我：在呢在呢]真的吗")
+
+        self.llm.script = [{"content": "", "tool_calls": [tool_call("r", "rest", minutes=30)]}]
+        await self.post(group_event("小鲸今天吃啥", at_me=False))
+        self.assertTrue(await wait_for(lambda: len(self.llm.seen) == 2, timeout=2))
+        self.assertIn("（有人叫你名字）", self.llm.seen[1][-1]["content"])
+
     async def test_rest_ends_turn_and_sets_next_heartbeat(self):
         self.llm.script = [{"content": "", "tool_calls": [tool_call("r", "rest", minutes=10)]}]
         self.app.agent.next_heartbeat = 0

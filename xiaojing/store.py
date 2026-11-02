@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS events (
   raw TEXT
 );
 CREATE INDEX IF NOT EXISTS events_conv ON events(conv, id);
+CREATE INDEX IF NOT EXISTS events_msg ON events(conv, msg_id);
 CREATE TABLE IF NOT EXISTS reads (conv TEXT PRIMARY KEY, last_id INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS usage (
   id INTEGER PRIMARY KEY, ts REAL NOT NULL, model TEXT,
@@ -74,11 +75,21 @@ class Store:
         ).fetchall()
         return rows[::-1]
 
-    def unread(self, conv) -> int:
-        last = self._last_read(conv)
+    def unread(self, conv, before_id=None) -> int:
+        """未读几条；给了 before_id 就只数比它更早的。"""
+        sql, args = "SELECT COUNT(*) FROM events WHERE conv = ? AND id > ? AND mine = 0", [conv, self._last_read(conv)]
+        if before_id is not None:
+            sql += " AND id < ?"
+            args.append(before_id)
+        return self.db.execute(sql, args).fetchone()[0]
+
+    def by_msg_id(self, conv, msg_id) -> sqlite3.Row | None:
+        """按 QQ 的消息编号找一条，看别人回复的是谁。"""
+        if not msg_id:
+            return None
         return self.db.execute(
-            "SELECT COUNT(*) FROM events WHERE conv = ? AND id > ? AND mine = 0", (conv, last)
-        ).fetchone()[0]
+            "SELECT * FROM events WHERE conv = ? AND msg_id = ? ORDER BY id DESC LIMIT 1", (conv, str(msg_id))
+        ).fetchone()
 
     def mark_read(self, conv):
         top = self.db.execute("SELECT MAX(id) FROM events WHERE conv = ?", (conv,)).fetchone()[0]
