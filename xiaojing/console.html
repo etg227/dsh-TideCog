@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>小鲸管理台</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<style>
+  /* 和架构图同一套深色：上面一排状态，左边是她在干嘛，右边是积压、上下文和名单 */
+  :root {
+    --bg: #080d1a;
+    --zone: #0d1527;
+    --panel: #131e36;
+    --panel2: #111b31;
+    --line: #1c2944;
+    --line2: #2b3b5e;
+    --fg: #e9eef8;
+    --fg2: #c3cce0;
+    --muted: #8290b0;
+    --teal: #5fe3d0;
+    --amber: #f2c374;
+    --violet: #a991fb;
+    --coral: #f08c6e;
+    --sans: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--fg); font: 14px/1.6 var(--sans); }
+  button { font: inherit; }
+  :focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+  .page { max-width: 1280px; margin: 0 auto; padding: 24px 20px 48px; display: grid; gap: 18px; }
+
+  .banner { display: none; padding: 10px 14px; border: 1px solid var(--coral); border-radius: 10px; color: var(--coral); background: color-mix(in srgb, var(--coral) 8%, var(--bg)); }
+  .banner.show { display: block; }
+
+  header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; }
+  .brand svg { width: 34px; height: 34px; }
+  .brand h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: .02em; }
+  .brand span { color: var(--muted); font-weight: 400; margin-left: 6px; font-size: 15px; }
+  .badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line2); font-size: 13px; color: var(--fg2); }
+  .badge i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .badge.wait i { background: var(--teal); opacity: .55; }
+  .badge.run i { background: var(--teal); box-shadow: 0 0 0 0 var(--teal); animation: ping 1.4s ease-out infinite; }
+  .badge.paused { border-color: var(--amber); color: var(--amber); }
+  .badge.paused i { background: var(--amber); }
+  @keyframes ping { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--teal) 70%, transparent); } 100% { box-shadow: 0 0 0 9px transparent; } }
+
+  .toggle { cursor: pointer; padding: 9px 22px; border-radius: 10px; font-weight: 700; letter-spacing: .08em; transition: background .15s, color .15s; }
+  .toggle.pause { background: transparent; border: 1.5px solid var(--amber); color: var(--amber); }
+  .toggle.pause:hover { background: color-mix(in srgb, var(--amber) 14%, transparent); }
+  .toggle.resume { background: var(--teal); border: 1.5px solid var(--teal); color: #062420; }
+  .toggle:disabled { opacity: .5; cursor: wait; }
+
+  .status { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; min-width: 0; }
+  .label { font-size: 12px; color: var(--muted); letter-spacing: .08em; }
+  .headline { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 16px; font-weight: 700; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+  .ok .dot { background: var(--teal); }
+  .warn .dot { background: var(--amber); }
+  .bad .dot { background: var(--coral); }
+  .bad .headline { color: var(--coral); }
+  .detail { margin-top: 4px; font: 12px/1.6 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+  .money { font: 600 26px/1.2 var(--mono); margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+  .main { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(280px, 1fr); gap: 14px; align-items: start; }
+  @media (max-width: 860px) { .main { grid-template-columns: 1fr; } }
+  .panel { background: var(--zone); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; min-width: 0; }
+  .panel h2 { margin: 0 0 12px; font-size: 15px; display: flex; align-items: baseline; gap: 10px; }
+  .panel h2 small { font-size: 12px; font-weight: 400; color: var(--muted); }
+  .side { display: grid; gap: 14px; }
+
+  .feed { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; max-height: 70vh; overflow-y: auto; }
+  .item { display: grid; grid-template-columns: 46px 64px minmax(0, 1fr); gap: 10px; padding: 8px 6px; border-radius: 8px; align-items: start; }
+  .item:hover { background: var(--panel2); }
+  .item time { font: 12px/1.9 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+  .kind { font-size: 11.5px; line-height: 1.5; padding: 2px 0; border-radius: 999px; text-align: center; border: 1px solid currentColor; white-space: nowrap; }
+  .text { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg2); }
+  .text .conv { font: 11.5px var(--mono); color: var(--muted); margin-right: 6px; }
+  .k-wake .kind { color: var(--teal); }
+  .k-think .kind { color: var(--violet); }
+  .k-think .text { color: color-mix(in srgb, var(--violet) 55%, var(--fg2)); font-style: italic; }
+  .k-tool .kind, .k-info .kind { color: var(--muted); }
+  .k-tool .text { font: 12.5px/1.7 var(--mono); color: var(--muted); }
+  .k-send .kind { color: var(--amber); }
+  .k-send .text { color: var(--fg); background: color-mix(in srgb, var(--amber) 9%, var(--panel)); border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent); padding: 6px 10px; border-radius: 4px 12px 12px 12px; justify-self: start; }
+  .k-blocked .kind, .k-error .kind { color: var(--coral); }
+  .k-blocked .text, .k-error .text { color: var(--coral); }
+  .k-warn .kind { color: var(--amber); }
+  .empty { color: var(--muted); padding: 18px 6px; }
+
+  .rows { display: grid; gap: 8px; }
+  .row { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+  .row span:first-child { color: var(--muted); }
+  .row b { font-weight: 500; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .meter { height: 6px; border-radius: 99px; background: var(--line); overflow: hidden; margin-top: 4px; }
+  .meter i { display: block; height: 100%; background: var(--teal); border-radius: 99px; transition: width .3s; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font: 12px var(--mono); padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line2); color: var(--fg2); }
+  .note { font-size: 12.5px; color: var(--muted); margin: 0; }
+  .note.warn { color: var(--amber); }
+  .roadmap { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+  .roadmap li { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); }
+  .roadmap li b { font-weight: 400; color: var(--fg2); }
+
+  footer { font-size: 12px; color: var(--muted); display: flex; gap: 16px; flex-wrap: wrap; }
+
+  .login { position: fixed; inset: 0; display: none; place-items: center; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(4px); padding: 20px; }
+  .login.show { display: grid; }
+  .login form { width: min(380px, 100%); background: var(--panel); border: 1px solid var(--line2); border-radius: 16px; padding: 22px; display: grid; gap: 12px; }
+  .login h2 { margin: 0; font-size: 17px; }
+  .login input { font: 14px var(--mono); padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line2); background: var(--bg); color: var(--fg); }
+  .login button { cursor: pointer; padding: 10px; border-radius: 10px; border: 0; background: var(--teal); color: #062420; font-weight: 700; }
+  .login .err { color: var(--coral); font-size: 13px; min-height: 1.2em; margin: 0; }
+
+  @media (prefers-reduced-motion: reduce) { .badge.run i { animation: none; } .meter i { transition: none; } }
+</style>
+</head>
+<body>
+<main class="page">
+  <div class="banner" id="banner" role="status">连不上主程序。它可能没在运行，或者刚重启，过几秒会自动重试。</div>
+
+  <header>
+    <div class="brand">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="30" fill="#0f1a30" stroke="#5fe3d0" stroke-opacity=".5"/><path d="M14 36 C17 25 35 21 45 31 L53 24 C54 28 55 31 58 32 C55 33 54 36 53 40 L45 35 C37 46 18 47 14 36 Z" fill="#5fe3d0"/><circle cx="21" cy="33" r="1.6" fill="#0f1a30"/></svg>
+      <h1>小鲸<span>管理台</span></h1>
+    </div>
+    <div class="badge wait" id="badge"><i></i><span>在等消息</span></div>
+    <button class="toggle pause" id="toggle" type="button">暂停</button>
+  </header>
+
+  <section class="status" aria-label="各部分状态">
+    <div class="card" id="qq"><div class="label">QQ 网关</div><div class="headline"><span class="dot"></span><span class="h">—</span></div><div class="detail d">—</div></div>
+    <div class="card" id="llm"><div class="label">DeepSeek</div><div class="headline"><span class="dot"></span><span class="h">—</span></div><div class="detail d">—</div></div>
+    <div class="card" id="dsh"><div class="label">DSH 子代理</div><div class="headline"><span class="dot"></span><span class="h">第 6 步再接</span></div><div class="detail d">现在还没有子代理</div></div>
+    <div class="card" id="cost"><div class="label">今天的花费</div><div class="money" id="money">¥0.00</div><div class="detail d">—</div></div>
+  </section>
+
+  <div class="main">
+    <section class="panel">
+      <h2>她在干嘛 <small>最新的在下面，每 2 秒刷新</small></h2>
+      <ol class="feed" id="feed"><li class="empty">还没有动静。有人在允许的群里 @ 她，或者私聊她，这里就会动起来。</li></ol>
+    </section>
+
+    <div class="side">
+      <section class="panel">
+        <h2>待处理</h2>
+        <div class="rows" id="pending"><p class="note">没有积压。</p></div>
+      </section>
+      <section class="panel">
+        <h2>上下文 <small>只移出，不总结</small></h2>
+        <div class="rows">
+          <div class="row"><span>会话里留着的圈数</span><b id="turns">0 / 30</b></div>
+          <div class="meter"><i id="turnsBar" style="width: 0%"></i></div>
+          <div class="row"><span>消息条数</span><b id="msgs">0</b></div>
+          <p class="note">超过上限，就把最旧的三分之一整块移进存档。</p>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>允许名单 <small>在 config.toml 里改</small></h2>
+        <div class="rows">
+          <div class="row"><span>群</span></div><div class="chips" id="groups"></div>
+          <div class="row"><span>私聊</span></div><div class="chips" id="users"></div>
+          <p class="note" id="allowNote"></p>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>后面几步</h2>
+        <ul class="roadmap">
+          <li><b>收件箱、心跳、作息</b><span>第 2 步</span></li>
+          <li><b>记忆树</b><span>第 3 步</span></li>
+          <li><b>念头和思绪板</b><span>第 4 步</span></li>
+          <li><b>按场景挑语气</b><span>第 5 步</span></li>
+          <li><b>子代理和信息源</b><span>第 6 步</span></li>
+        </ul>
+      </section>
+    </div>
+  </div>
+
+  <footer><span id="refreshed">还没刷新</span><span id="uptime"></span><span>急停：管理台按钮，或用你的 QQ 私聊她发「暂停」</span></footer>
+</main>
+
+<div class="login" id="login">
+  <form id="loginForm">
+    <h2>登录管理台</h2>
+    <p class="note">口令在项目文件夹的 <code>data/console-token.txt</code> 里。</p>
+    <label for="token" class="note">口令</label>
+    <input id="token" name="token" type="password" autocomplete="current-password" required>
+    <p class="err" id="loginErr"></p>
+    <button type="submit">登录</button>
+  </form>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const KINDS = {
+  wake: '叫醒', think: '心里想', tool: '看了', send: '说出口',
+  blocked: '被拦下', error: '出错', warn: '注意', info: '系统',
+};
+let state = null;
+let busy = false;
+let firstRender = true;
+
+function hhmm(ts) {
+  const d = new Date(ts * 1000);
+  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+function ago(ts, now) {
+  if (!ts) return '从没有';
+  const s = Math.max(0, now - ts);
+  if (s < 60) return '刚刚';
+  if (s < 3600) return `${Math.floor(s / 60)} 分钟前`;
+  if (s < 86400) return `${Math.floor(s / 3600)} 小时前`;
+  return hhmm(ts);
+}
+function duration(s) {
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return h ? `运行了 ${h} 小时 ${m} 分` : `运行了 ${m} 分钟`;
+}
+function setCard(id, level, headline, detail) {
+  const el = $(id);
+  el.classList.remove('ok', 'warn', 'bad');
+  if (level) el.classList.add(level);
+  el.querySelector('.h').textContent = headline;
+  el.querySelector('.d').textContent = detail;
+}
+
+function render(s) {
+  state = s;
+  const now = s.now;
+
+  const badge = $('badge');
+  badge.className = 'badge ' + (s.paused ? 'paused' : s.running ? 'run' : 'wait');
+  badge.querySelector('span').textContent = s.paused ? '已暂停' : s.running ? '正在想' : '在等消息';
+  const t = $('toggle');
+  t.className = 'toggle ' + (s.paused ? 'resume' : 'pause');
+  t.textContent = s.paused ? '继续' : '暂停';
+
+  const q = s.qq;
+  const lastGood = Math.max(q.last_ok, q.last_event);
+  const who = q.self_id ? `测试号 ${q.self_id}${q.nickname ? '（' + q.nickname + '）' : ''}` : q.api_url;
+  if (q.last_error_ts && q.last_error_ts > lastGood) setCard('qq', 'bad', '出错了', q.last_error);
+  else if (!lastGood) setCard('qq', 'warn', '还没连上', `等 SnowLuma 上报或探活 · ${q.api_url}`);
+  else if (now - lastGood < 180) setCard('qq', 'ok', '已连上', `${who} · 上次收到消息 ${ago(q.last_event, now)}`);
+  else setCard('qq', 'warn', '一阵没动静了', `${who} · 上次正常 ${ago(lastGood, now)}`);
+
+  const l = s.llm;
+  if (l.ok === null) setCard('llm', '', '还没调用过', l.model);
+  else if (l.ok) setCard('llm', 'ok', '正常', `${l.model} · 上次 ${ago(l.last_ts, now)}`);
+  else setCard('llm', 'bad', '出错了', l.last_error);
+
+  const c = s.cost;
+  $('money').textContent = '¥' + c.yuan.toFixed(c.yuan < 1 ? 3 : 2);
+  $('cost').querySelector('.d').textContent = c.calls
+    ? `命中率 ${Math.round(c.hit_rate * 100)}% · ${c.calls} 次调用`
+    : '今天还没调用';
+
+  const feed = $('feed');
+  // 像聊天记录一样，新的在下面；人往上翻着看的时候不把他拽回底部
+  const pinned = firstRender || feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40;
+  feed.replaceChildren();
+  if (!s.feed.length) {
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.textContent = '还没有动静。有人在允许的群里 @ 她，或者私聊她，这里就会动起来。';
+    feed.append(li);
+  }
+  for (const f of [...s.feed].reverse()) {
+    const li = document.createElement('li');
+    li.className = 'item k-' + f.kind;
+    const tm = document.createElement('time');
+    tm.textContent = hhmm(f.ts);
+    const kd = document.createElement('span');
+    kd.className = 'kind';
+    kd.textContent = KINDS[f.kind] || f.kind;
+    const tx = document.createElement('div');
+    tx.className = 'text';
+    if (f.conv && f.kind === 'send') {
+      const cv = document.createElement('span');
+      cv.className = 'conv';
+      cv.textContent = f.conv;
+      tx.append(cv);
+    }
+    tx.append(document.createTextNode(f.text));
+    li.append(tm, kd, tx);
+    feed.append(li);
+  }
+  if (pinned) feed.scrollTop = feed.scrollHeight;
+  firstRender = false;
+
+  const pending = $('pending');
+  pending.replaceChildren();
+  if (!s.pending.length) {
+    const p = document.createElement('p');
+    p.className = 'note';
+    p.textContent = s.paused ? '暂停中，有消息会先攒着。' : '没有积压。';
+    pending.append(p);
+  }
+  for (const p of s.pending) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const a = document.createElement('span'); a.textContent = p.conv;
+    const b = document.createElement('b'); b.textContent = p.reason;
+    row.append(a, b);
+    pending.append(row);
+  }
+
+  const cx = s.context;
+  $('turns').textContent = `${cx.turns} / ${cx.max_turns}`;
+  $('turnsBar').style.width = Math.min(100, cx.turns / cx.max_turns * 100) + '%';
+  $('msgs').textContent = cx.messages;
+
+  for (const [id, list] of [['groups', s.allow.groups], ['users', s.allow.users]]) {
+    const box = $(id);
+    box.replaceChildren();
+    for (const x of list) {
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.textContent = x;
+      box.append(chip);
+    }
+    if (!list.length) {
+      const none = document.createElement('span');
+      none.className = 'note';
+      none.textContent = '空';
+      box.append(none);
+    }
+  }
+  const note = $('allowNote');
+  const warns = [];
+  if (!s.allow.groups.length && !s.allow.users.length) warns.push('名单是空的，她谁也不会回。');
+  if (!s.allow.owner) warns.push('没填 owner_qq，私聊「暂停」不会生效。');
+  note.textContent = warns.join(' ');
+  note.className = 'note' + (warns.length ? ' warn' : '');
+
+  $('refreshed').textContent = '上次刷新 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  $('uptime').textContent = duration(s.uptime);
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { credentials: 'same-origin', ...opts });
+  if (res.status === 401) { $('login').classList.add('show'); throw new Error('unauthorized'); }
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+async function refresh() {
+  try {
+    render(await api('/api/state'));
+    $('banner').classList.remove('show');
+    $('login').classList.remove('show');
+  } catch (e) {
+    if (e.message !== 'unauthorized') $('banner').classList.add('show');
+  }
+}
+
+$('toggle').addEventListener('click', async () => {
+  if (busy || !state) return;
+  busy = true;
+  $('toggle').disabled = true;
+  try {
+    render(await api(state.paused ? '/api/resume' : '/api/pause', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    }));
+  } catch (e) {
+    if (e.message !== 'unauthorized') $('banner').classList.add('show');
+  } finally {
+    busy = false;
+    $('toggle').disabled = false;
+  }
+});
+
+$('loginForm').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  $('loginErr').textContent = '';
+  const res = await fetch('/api/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: $('token').value }),
+  }).catch(() => null);
+  if (!res) { $('loginErr').textContent = '连不上主程序。'; return; }
+  if (!res.ok) { $('loginErr').textContent = '口令不对，再看一眼 data/console-token.txt。'; return; }
+  $('token').value = '';
+  $('login').classList.remove('show');
+  refresh();
+});
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

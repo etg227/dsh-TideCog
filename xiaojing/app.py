@@ -1,0 +1,130 @@
+"""把各部分接起来：OneBot 上报 → 事件库 → 叫醒她；管理台；定时探活。"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+
+from .agent import Agent
+from .config import ROOT, Config
+from .console import Console
+from .gate import Gate
+from .httpserver import Response, Server, json_response
+from .llm import DeepSeek
+from .onebot import OneBot, OneBotError, parse_message_event
+from .store import Store
+
+log = logging.getLogger(__name__)
+
+OWNER_COMMANDS = {"暂停": True, "继续": False}
+
+
+class PortInUse(Exception):
+    pass
+PROBE_EVERY = 60  # 秒
+
+
+def load_system_prompt() -> str:
+    """框架规矩 + 人设。两份都是固定文本，放在最前面，好命中缓存。"""
+    parts = [(ROOT / "prompts" / "system.md").read_text(encoding="utf-8"),
+             (ROOT / "persona.md").read_text(encoding="utf-8")]
+    return "\n\n".join(p.strip() for p in parts)
+
+
+class App:
+    def __init__(self, cfg: Config, llm=None, system_prompt: str | None = None):
+        cfg.data_dir.mkdir(parents=True, exist_ok=True)
+        self.cfg = cfg
+        self.started = time.time()
+        self.store = Store(cfg.data_dir / "events.db")
+        self.onebot = OneBot(cfg.onebot)
+        self.gate = Gate(cfg.gate)
+        self.agent = Agent(cfg, self.store, self.onebot, self.gate, llm or DeepSeek(cfg.llm),
+                           system_prompt if system_prompt is not None else load_system_prompt())
+        self.receiver = Server(cfg.onebot.listen_host, cfg.onebot.listen_port, self.on_onebot)
+        self.console = Console(cfg, self)
+        self._tasks: list[asyncio.Task] = []
+
+    async def start(self):
+        for name, server in (("[onebot] listen_port", self.receiver), ("[console] port", self.console.server)):
+            try:
+                await server.start()
+            except OSError as e:
+                await self.receiver.close()
+                self.store.close()
+                raise PortInUse(f"端口 {server.port} 用不了（{e.strerror}）。换一个：改 config.toml 里的 {name}") from None
+        self._tasks = [asyncio.create_task(self.agent.run()), asyncio.create_task(self._probe_loop())]
+        log.info("OneBot 上报地址：http://%s:%s/", self.cfg.onebot.listen_host, self.receiver.port)
+        log.info("管理台：http://%s:%s/ （口令在 %s）", self.cfg.console.host, self.console.server.port,
+                 self.console.token_path)
+
+    async def stop(self):
+        for t in self._tasks:
+            t.cancel()
+        await asyncio.gather(*self._tasks, return_exceptions=True)
+        await self.receiver.close()
+        await self.console.server.close()
+        self.store.close()
+
+    async def run_forever(self):
+        await self.start()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await self.stop()
+
+    # ── 暂停 / 继续 ───────────────────────────────────
+    def set_paused(self, paused: bool, by: str):
+        if self.gate.paused == paused:
+            return
+        self.gate.paused = paused
+        self.store.add_feed("info", f"{'已暂停' if paused else '继续运转'}（{by}）")
+        if not paused:
+            self.agent.nudge()
+
+    # ── OneBot 上报 ───────────────────────────────────
+    async def on_onebot(self, req) -> Response:
+        if req.method != "POST":
+            return json_response({"error": "只收 POST"}, 405)
+        if not self.onebot.verify(req.body, req.headers.get("x-signature", "")):
+            return json_response({"error": "签名不对"}, 401)
+        try:
+            evt = req.json()
+        except ValueError:
+            return json_response({"error": "不是 JSON"}, 400)
+        self.onebot.last_event = time.time()
+        if evt.get("self_id"):
+            self.onebot.self_id = str(evt["self_id"])
+        if m := parse_message_event(evt):
+            await self.handle_message(m)
+        return Response(204)
+
+    async def handle_message(self, m: dict):
+        conv = m["conv"]
+        self.store.add_event(conv, m["text"], ts=m["ts"], sender_id=m["sender_id"],
+                             sender_name=m["sender_name"], msg_id=m["msg_id"],
+                             mentions_me=m["mentions_me"], raw=m["raw"])
+        owner = self.cfg.gate.owner_qq
+        if owner and conv == f"private:{owner}" and m["text"] in OWNER_COMMANDS:
+            paused = OWNER_COMMANDS[m["text"]]
+            self.set_paused(paused, "主人私聊")
+            try:  # 这是系统回执，不经过她，也不受闸门限制
+                await self.onebot.send_text(conv, "已暂停。私聊发「继续」恢复。" if paused else "继续了。")
+            except OneBotError as e:
+                self.store.add_feed("error", f"暂停回执没发出去：{e}")
+            return
+        if not self.gate.allowed(conv):
+            return
+        if conv.startswith("private:"):
+            self.agent.wake(conv, "私聊")
+        elif m["mentions_me"]:
+            self.agent.wake(conv, "有人 @ 你")
+        # 群里的普通消息第 1 步先只存不叫醒；第 2 步的收件箱再决定什么时候看
+
+    async def _probe_loop(self):
+        while True:
+            try:
+                await self.onebot.probe()
+            except OneBotError:
+                pass  # 错误已经记在 onebot.last_error，管理台会显示
+            await asyncio.sleep(PROBE_EVERY)

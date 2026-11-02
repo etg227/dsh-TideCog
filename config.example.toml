@@ -1,0 +1,31 @@
+# 复制一份改名成 config.toml 再改。密钥不写在这里，见 README 的「设置密钥」。
+
+data_dir = "data"
+max_turns = 30          # 会话里最多留几圈；超了把最旧的三分之一整块移进存档
+
+[onebot]
+api_url = "http://127.0.0.1:3020"   # 测试号 SnowLuma 的 HTTP 服务器
+listen_host = "127.0.0.1"
+listen_port = 5311                  # SnowLuma 的 HTTP 上报发到 http://127.0.0.1:5311/
+
+[llm]
+base_url = "https://api.deepseek.com"
+model = "deepseek-chat"
+max_steps = 8           # 一圈里最多连着调几次模型
+# 每百万 token 多少元（闲时价）。默认是 DeepSeek-V4.1-Flash 的价，换模型记得改
+price_hit = 0.02
+price_miss = 1.0
+price_out = 4.0
+peak_multiplier = 2.0   # 工作日 9–12 点、14–18 点按这个倍数算
+
+[gate]
+owner_qq = ""           # 你的 QQ 号。私聊她发「暂停」「继续」只认这个号
+allow_groups = []       # 允许她说话的群，比如 ["123456789"]
+allow_users = []        # 允许私聊的 QQ 号
+per_conv_per_minute = 4
+global_per_minute = 10
+max_text_len = 500
+
+[console]
+host = "127.0.0.1"
+port = 5310
