@@ -53,6 +53,8 @@
   .badge.sleep i { background: var(--violet); }
   @keyframes ping { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--teal) 70%, transparent); } 100% { box-shadow: 0 0 0 9px transparent; } }
 
+  .setlink { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line2); color: var(--fg2); text-decoration: none; font-size: 13px; }
+  .setlink:hover { border-color: var(--teal); color: var(--teal); }
   .toggle { cursor: pointer; padding: 9px 22px; border-radius: 10px; font-weight: 700; letter-spacing: .08em; transition: background .15s, color .15s; }
   .toggle.pause { background: transparent; border: 1.5px solid var(--amber); color: var(--amber); }
   .toggle.pause:hover { background: color-mix(in srgb, var(--amber) 14%, transparent); }
@@ -133,6 +135,7 @@
       <svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="30" fill="#0f1a30" stroke="#5fe3d0" stroke-opacity=".5"/><path d="M14 36 C17 25 35 21 45 31 L53 24 C54 28 55 31 58 32 C55 33 54 36 53 40 L45 35 C37 46 18 47 14 36 Z" fill="#5fe3d0"/><circle cx="21" cy="33" r="1.6" fill="#0f1a30"/></svg>
       <h1>小鲸<span>管理台</span></h1>
     </div>
+    <a class="setlink" id="setLink" href="/setup" hidden>设置</a>
     <div class="badge wait" id="badge"><i></i><span>在等消息</span></div>
     <button class="toggle pause" id="toggle" type="button">暂停</button>
   </header>
@@ -444,6 +447,7 @@ $('loginForm').addEventListener('submit', async (ev) => {
 
 refresh();
 setInterval(refresh, 2000);
+waitBridge(3000).then((ok) => { if (ok) $('setLink').hidden = false; });  // 只有桌面版有设置页
 </script>
 </body>
 </html>

@@ -8,6 +8,16 @@
 
 ![小鲸的简易框架图](docs/architecture.svg)
 
+## 下载就能用
+
+1. 装好 [NapCat](https://github.com/NapNeko/NapCatQQ)，登录一个 **QQ 小号**。
+2. 到 [Releases](https://github.com/etg227/dsh-TideCog/releases) 下载 `launcher.exe`，双击。
+3. 第一次打开是设置页：填你的 QQ 号、允许她说话的群、OneBot 的地址和 token、DeepSeek API key，点「保存并启动」。设置页右边写着 NapCat 那边要怎么配。
+
+不用装 Python，也不用设环境变量。配置和聊天记录存在 `%APPDATA%\xiaojing`，密钥用 Windows 自带的加密保存，只有你这个 Windows 账号能解开。第一次打开时 Windows 可能提示"已保护你的电脑"（exe 没有数字签名），点"更多信息 → 仍要运行"。
+
+想自己改代码、从源码跑，看下面的"跑起来"。
+
 ## 设计思路
 
 **一个人格，一个会话。** 不给每个群开一个分身。她在 A 群聊过的事，在私聊里也记得；没想完的事，在同一条上下文里接着想。
@@ -138,10 +148,12 @@ python -m tests.demo_console
 
 不想挂着命令行窗口、也不想开浏览器的话，用桌面版：双击 `launcher.exe`，打开的窗口里就是管理台，自动登录，不用输口令。
 
-- 点关闭会缩到右下角托盘，她继续在后台转。单击托盘图标重新打开，右键可以暂停、继续、退出
+- 第一次打开（或者缺 QQ 号、key、token）先进设置页，填好就上线。以后想改，从托盘菜单或管理台右上角点「设置」
+- 设置页填的密钥用 Windows 的 DPAPI 加密存在 `data/secrets.bin`；环境变量设了的话，环境变量优先
+- 点关闭会缩到右下角托盘，她继续在后台转。单击托盘图标重新打开，右键可以设置、暂停、继续、退出
 - 只能开一个，再双击会把已经开着的窗口叫出来
-- 启动失败（端口被占、配置写错）会弹窗说明；没设 key、名单为空这类问题会在托盘弹提示
-- `launcher.exe` 要和 `config.toml`、`persona.md`、`prompts/`、`data/` 放在同一个文件夹里
+- 启动失败（端口被占、配置写错）会弹窗说明；名单为空这类问题会在托盘弹提示
+- 文件放哪：`launcher.exe` 旁边有 `config.toml`，就用 exe 所在的文件夹（比如放在项目里）；没有就用 `%APPDATA%\xiaojing`，第一次运行时自动放好默认的配置、人设和规矩
 - 需要 Windows 10 / 11，窗口用的是系统自带的 WebView2
 
 exe 不放在仓库里，自己打包（这几个包只有桌面版要用，核心程序还是不用装任何东西）：
@@ -174,6 +186,9 @@ python -m unittest discover -s tests -t .
 | `xiaojing/console.py`、`console.html` | 管理台 |
 | `xiaojing/httpserver.py` | 一个很小的异步 HTTP 服务器 |
 | `xiaojing/desktop.py`、`tray.py` | 桌面版：窗口、自动登录、托盘、只开一个 |
+| `xiaojing/setup.py`、`setup.html` | 第一次运行的默认文件、设置页的检查和保存 |
+| `xiaojing/secrets.py` | 密钥加密存盘（Windows DPAPI） |
+| `persona.default.md` | 打包进 exe 的默认人设 |
 | `scripts/` | 打包 launcher.exe、画图标 |
 | `prompts/system.md` | 运转规矩：她是怎么被叫醒、怎么转一圈的 |
 | `persona.md` | 人设：她是谁、怎么说话 |

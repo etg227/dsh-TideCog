@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>小鲸设置</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<style>
+  /* 和管理台同一套深色：左边填表，右边是 OneBot 那边要怎么配 */
+  :root {
+    --bg: #080d1a; --zone: #0d1527; --panel: #131e36; --line: #1c2944; --line2: #2b3b5e;
+    --fg: #e9eef8; --fg2: #c3cce0; --muted: #8290b0;
+    --teal: #5fe3d0; --amber: #f2c374; --coral: #f08c6e;
+    --sans: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--fg); font: 14px/1.6 var(--sans); }
+  :focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+  .page { max-width: 1120px; margin: 0 auto; padding: 28px 20px 48px; display: grid; gap: 20px; }
+  header { display: flex; align-items: center; gap: 12px; }
+  header svg { width: 40px; height: 40px; }
+  h1 { margin: 0; font-size: 22px; }
+  .lede { margin: 2px 0 0; color: var(--muted); }
+  .grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(280px, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+  .panel { background: var(--zone); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; min-width: 0; }
+  .panel h2 { margin: 0 0 14px; font-size: 15px; }
+  fieldset { border: 0; margin: 0 0 18px; padding: 0; display: grid; gap: 12px; }
+  legend { font-size: 12px; color: var(--muted); letter-spacing: .08em; margin-bottom: 8px; padding: 0; }
+  label { display: grid; gap: 5px; font-size: 13.5px; color: var(--fg2); }
+  label small { color: var(--muted); font-size: 12px; }
+  input { font: 14px var(--mono); padding: 9px 11px; border-radius: 9px; border: 1px solid var(--line2); background: var(--bg); color: var(--fg); width: 100%; }
+  input::placeholder { color: #55617f; }
+  .err { color: var(--coral); font-size: 12.5px; min-height: 0; }
+  .set { color: var(--teal); font-size: 12px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 560px) { .row2 { grid-template-columns: 1fr; } }
+  .actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  button { font: inherit; cursor: pointer; padding: 10px 26px; border-radius: 10px; border: 0; background: var(--teal); color: #062420; font-weight: 700; letter-spacing: .06em; }
+  button:disabled { opacity: .55; cursor: wait; }
+  .status { font-size: 13px; color: var(--muted); }
+  .status.bad { color: var(--coral); }
+  .steps { margin: 0; padding-left: 1.2em; display: grid; gap: 10px; color: var(--fg2); font-size: 13.5px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin-top: 6px; font-size: 12.5px; }
+  .kv span { color: var(--muted); }
+  .kv code { font: 12.5px var(--mono); color: var(--fg); overflow-wrap: anywhere; }
+  .note { font-size: 12.5px; color: var(--muted); margin: 14px 0 0; }
+  .warn { border: 1px solid var(--amber); color: var(--amber); border-radius: 10px; padding: 10px 12px; font-size: 13px; display: none; }
+  .warn.show { display: block; }
+</style>
+</head>
+<body>
+<main class="page">
+  <header>
+    <svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="30" fill="#0f1a30" stroke="#5fe3d0" stroke-opacity=".5"/><path d="M14 36 C17 25 35 21 45 31 L53 24 C54 28 55 31 58 32 C55 33 54 36 53 40 L45 35 C37 46 18 47 14 36 Z" fill="#5fe3d0"/><circle cx="21" cy="33" r="1.6" fill="#0f1a30"/></svg>
+    <div>
+      <h1>小鲸设置</h1>
+      <p class="lede" id="lede">填好下面几项，她就能上线了。以后想改，从托盘菜单点「设置」回来。</p>
+    </div>
+  </header>
+
+  <div class="warn" id="browserWarn">设置页要在 launcher.exe 的窗口里用。命令行版请直接改项目文件夹里的 config.toml，密钥设成环境变量。</div>
+
+  <div class="grid">
+    <form class="panel" id="form" autocomplete="off">
+      <fieldset>
+        <legend>你是谁</legend>
+        <div class="row2">
+          <label for="owner_qq">你的 QQ 号
+            <input id="owner_qq" name="owner_qq" inputmode="numeric" placeholder="比如 123456789" required>
+            <small>她的主人。私聊她发「暂停」「继续」只认这个号，夜里也只有这个号叫得醒她</small>
+            <span class="err" data-for="owner_qq"></span>
+          </label>
+          <label for="owner_name">她怎么称呼你
+            <input id="owner_name" name="owner_name" placeholder="主人">
+            <small>会写进她的设定里</small>
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>她能在哪说话</legend>
+        <label for="allow_groups">允许她说话的群
+          <input id="allow_groups" name="allow_groups" placeholder="群号，多个用空格或逗号隔开">
+          <small>先放一个测试群试试，别一上来就放大群</small>
+        </label>
+        <label for="allow_users">允许私聊她的人
+          <input id="allow_users" name="allow_users" placeholder="QQ 号，多个用空格或逗号隔开（你自己会自动加上）">
+        </label>
+      </fieldset>
+
+      <fieldset>
+        <legend>连 QQ（OneBot）</legend>
+        <label for="api_url">OneBot HTTP 服务器地址
+          <input id="api_url" name="api_url" placeholder="http://127.0.0.1:3020">
+          <span class="err" data-for="api_url"></span>
+        </label>
+        <div class="row2">
+          <label for="token">HTTP 服务器的 token
+            <input id="token" name="token" type="password" placeholder="在 NapCat 里设的那串">
+            <span class="set" data-set="has_token"></span>
+            <span class="err" data-for="token"></span>
+          </label>
+          <label for="secret">HTTP 客户端的 token（签名）
+            <input id="secret" name="secret" type="password" placeholder="可以不填，建议填">
+            <span class="set" data-set="has_secret"></span>
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>模型</legend>
+        <div class="row2">
+          <label for="api_key">DeepSeek API key
+            <input id="api_key" name="api_key" type="password" placeholder="sk-…">
+            <span class="set" data-set="has_key"></span>
+            <span class="err" data-for="api_key"></span>
+          </label>
+          <label for="model">模型名
+            <input id="model" name="model" placeholder="deepseek-chat">
+          </label>
+        </div>
+      </fieldset>
+
+      <div class="actions">
+        <button type="submit" id="save">保存并启动</button>
+        <span class="status" id="status" role="status"></span>
+      </div>
+      <p class="note">密钥用 Windows 自带的加密存在本机，只有你这个 Windows 账号能解开，不会写进任何明文文件。已经设过的密钥留空就是不改。</p>
+    </form>
+
+    <aside class="panel">
+      <h2>NapCat 那边要怎么配</h2>
+      <ol class="steps">
+        <li>装好 NapCat，登录一个 <b>QQ 小号</b>（自动收发消息有被封号的风险）。</li>
+        <li>在 NapCat 后台的「网络配置」里新建 <b>HTTP 服务器</b>：
+          <div class="kv"><span>地址</span><code>127.0.0.1</code><span>端口</span><code>3020</code><span>Token</span><code>自己设一串，填到左边</code><span>消息格式</span><code>array</code></div>
+        </li>
+        <li>再新建 <b>HTTP 客户端</b>（上报 / webhook）：
+          <div class="kv"><span>URL</span><code id="reportUrl">http://127.0.0.1:5311/</code><span>Token</span><code>再设一串，填到左边"签名"</code><span>消息格式</span><code>array</code></div>
+        </li>
+        <li>不用开 WebSocket。保存后回到这里点「保存并启动」。</li>
+      </ol>
+      <p class="note">端口别用 4300–4310，QQ 自己会占。<br>文件存在：<code id="root" style="font: 12px var(--mono)"></code></p>
+    </aside>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const FIELDS = ['owner_qq', 'owner_name', 'allow_groups', 'allow_users', 'api_url', 'token', 'secret', 'api_key', 'model'];
+
+function bridge(ms = 2500) {
+  return new Promise((resolve) => {
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.setup_state) return resolve(window.pywebview.api);
+    const timer = setTimeout(() => resolve(null), ms);
+    window.addEventListener('pywebviewready', () => { clearTimeout(timer); resolve(window.pywebview.api); }, { once: true });
+  });
+}
+
+function fill(s) {
+  for (const k of ['owner_qq', 'owner_name', 'allow_groups', 'allow_users', 'api_url', 'model']) $(k).value = s[k] || '';
+  for (const el of document.querySelectorAll('[data-set]')) el.textContent = s[el.dataset.set] ? '已经设过了，留空就是不改' : '';
+  $('reportUrl').textContent = s.report_url;
+  $('root').textContent = s.root;
+  if (s.missing.length) $('lede').textContent = `还差：${s.missing.join('、')}。填好就能上线；以后想改，从托盘菜单点「设置」回来。`;
+}
+
+function showErrors(errors) {
+  for (const el of document.querySelectorAll('.err')) el.textContent = errors[el.dataset.for] || '';
+}
+
+(async () => {
+  const api = await bridge();
+  if (!api) { $('browserWarn').classList.add('show'); $('save').disabled = true; return; }
+  fill(await api.setup_state());
+  $('form').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const values = Object.fromEntries(FIELDS.map((k) => [k, $(k).value]));
+    $('save').disabled = true;
+    $('status').className = 'status';
+    $('status').textContent = '保存中，正在重启小鲸…';
+    try {
+      const res = await api.save_setup(values);
+      showErrors(res.errors || {});
+      if (res.ok) {
+        $('status').textContent = '好了，正在打开管理台';
+        location.href = res.url;
+        return;
+      }
+      $('status').className = 'status bad';
+      $('status').textContent = res.message || '有几项要改一下';
+    } catch (e) {
+      $('status').className = 'status bad';
+      $('status').textContent = '保存失败：' + e;
+    }
+    $('save').disabled = false;
+  });
+})();
+</script>
+</body>
+</html>

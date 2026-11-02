@@ -29,8 +29,8 @@ def load_system_prompt(cfg: Config) -> str:
     parts = [(ROOT / "prompts" / "system.md").read_text(encoding="utf-8"),
              (ROOT / "persona.md").read_text(encoding="utf-8")]
     if owner := cfg.gate.owner_qq:
-        parts.append(f"## 认人\n- 主人的 QQ 号是 {owner}，你们的私聊是 private:{owner}。")
-    return "\n\n".join(p.strip() for p in parts)
+        parts.append(f"## 认人\n- {{owner_name}}的 QQ 号是 {owner}，你们的私聊是 private:{owner}。")
+    return "\n\n".join(p.strip() for p in parts).replace("{owner_name}", cfg.gate.owner_name)
 
 
 class App:
@@ -110,7 +110,7 @@ class App:
         if owner and conv == f"private:{owner}" and m["text"] in OWNER_COMMANDS:
             paused = OWNER_COMMANDS[m["text"]]
             self.store.mark_read(conv)  # 指令是给系统的，不算她的未读
-            self.set_paused(paused, "主人私聊")
+            self.set_paused(paused, f"{self.cfg.gate.owner_name}私聊")
             try:  # 这是系统回执，不经过她，也不受闸门限制
                 await self.onebot.send_text(conv, "已暂停。私聊发「继续」恢复。" if paused else "继续了。")
             except OneBotError as e:

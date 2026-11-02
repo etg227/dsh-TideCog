@@ -172,6 +172,9 @@ class EndToEndTest(unittest.IsolatedAsyncioTestCase):
         status, headers, body = await http("GET", self.console("/"))
         self.assertEqual(status, 200)
         self.assertIn("小鲸管理台", body.decode("utf-8"))
+        status, _, body = await http("GET", self.console("/setup"))  # 设置页不带数据，不用登录
+        self.assertEqual(status, 200)
+        self.assertIn("小鲸设置", body.decode("utf-8"))
 
 
 class PortInUseTest(unittest.IsolatedAsyncioTestCase):

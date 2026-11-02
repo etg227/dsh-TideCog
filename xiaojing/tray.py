@@ -78,13 +78,14 @@ _proto(user32.PostQuitMessage, None, ctypes.c_int)
 _proto(shell32.Shell_NotifyIconW, wintypes.BOOL, wintypes.DWORD, ctypes.POINTER(NOTIFYICONDATAW))
 _proto(kernel32.GetModuleHandleW, wintypes.HMODULE, wintypes.LPCWSTR)
 
-MENU = [(1, "打开管理台"), (2, "暂停"), (3, "继续"), (None, None), (4, "退出")]
+MENU = [(1, "打开管理台"), (5, "设置"), (None, None), (2, "暂停"), (3, "继续"), (None, None), (4, "退出")]
 
 
 class Tray:
-    def __init__(self, icon_path: Path | None, tip: str, *, on_open, on_pause, on_resume, on_quit, is_paused):
+    def __init__(self, icon_path: Path | None, tip: str, *, on_open, on_settings, on_pause, on_resume, on_quit,
+                 is_paused):
         self.icon_path, self.tip = icon_path, tip
-        self.actions = {1: on_open, 2: on_pause, 3: on_resume, 4: on_quit}
+        self.actions = {1: on_open, 2: on_pause, 3: on_resume, 4: on_quit, 5: on_settings}
         self.is_paused = is_paused
         self.hwnd = None
         self._ready = threading.Event()

@@ -1,6 +1,7 @@
 """桌面版：双击 launcher.exe 打开一个窗口，里面就是管理台；关窗口缩到托盘，她继续在后台转。
 
-不弹黑窗口、不开浏览器、不用输口令。只能开一个：再双击会把已经开着的窗口叫出来。
+不弹黑窗口、不开浏览器、不用输口令。第一次打开先进设置页，填好就上线。
+只能开一个：再双击会把已经开着的窗口叫出来。
 运行：.venv\\Scripts\\python -m xiaojing.desktop（或者打包好的 launcher.exe）
 """
 from __future__ import annotations
@@ -16,15 +17,9 @@ from pathlib import Path
 
 TITLE = "小鲸"
 MUTEX_NAME = "Local\\xiaojing-launcher"
-MB_ICONERROR, MB_ICONWARNING = 0x10, 0x30
+MB_ICONERROR = 0x10
 
 log = logging.getLogger("xiaojing.desktop")
-
-
-def resource(rel: str) -> Path:
-    """打包进 exe 的文件（图标等）。从源码跑时就在项目里。"""
-    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
-    return base / rel
 
 
 def message_box(text: str, icon=MB_ICONERROR):
@@ -104,41 +99,125 @@ class Backend:
             self.thread.join(timeout)
 
 
-class DesktopApi:
-    """给管理台页面用的接口：页面要登录时，直接从这里拿口令，不用人输。属性都带下划线，免得被暴露给网页。"""
+class Controller:
+    """管着后台、窗口和托盘；设置保存后在这里重启后台。"""
 
-    def __init__(self, token: str):
-        self._token = token
-        self._used = threading.Event()
+    def __init__(self, root: Path):
+        self.root = root
+        self.backend: Backend | None = None
+        self.window = None
+        self.tray = None
+        self.quitting = threading.Event()
+        self._lock = threading.Lock()
+        self.token_used = threading.Event()
+        self._hinted = threading.Event()  # 第一次缩到托盘时提示一下
+
+    def start_backend(self) -> Backend:
+        from .config import load
+        backend = Backend(load())
+        if not backend.start():
+            raise RuntimeError(f"小鲸没能启动：{backend.error}")
+        self.backend = backend
+        return backend
+
+    def url(self, path="") -> str:
+        return f"http://127.0.0.1:{self.backend.app.console.server.port}/{path}"
+
+    def restart_backend(self):
+        with self._lock:
+            log.info("按新设置重启小鲸")
+            self.backend.stop()
+            self.start_backend()
+
+    def warn_if_incomplete(self):
+        from .setup import missing
+        cfg = self.backend.cfg
+        warnings = [f"还没填：{'、'.join(m)}" for m in [missing(cfg)] if m]
+        if not cfg.gate.allow_groups and not [u for u in cfg.gate.allow_users if u != cfg.gate.owner_qq]:
+            warnings.append("允许名单里只有你自己")
+        for w in warnings:
+            log.warning(w)
+        if warnings and self.tray:
+            self.tray.notify("小鲸启动了，但有问题", "；".join(warnings) + "。从托盘菜单点「设置」去改。")
+
+    # ── 窗口和托盘的动作 ──────────────────────────────
+    def hide_to_tray(self):
+        self.window.hide()
+        if not self._hinted.is_set():
+            self._hinted.set()
+            self.tray.notify("小鲸还在后台", "点右下角的托盘图标就能再打开；右键可以暂停、设置或退出。")
+
+    def on_closing(self):
+        if self.quitting.is_set():
+            return True
+        threading.Thread(target=self.hide_to_tray, daemon=True).start()
+        return False  # 不真关，缩到托盘
+
+    def open_window(self, path=None):
+        if path is not None:
+            self.window.load_url(self.url(path))
+        self.window.show()
+        self.window.restore()
+
+    def set_paused(self, paused: bool):
+        self.backend.call(self.backend.app.set_paused, paused, "托盘")
+
+    def quit_all(self):
+        self.quitting.set()
+        log.info("从托盘退出")
+        self.backend.stop()
+        self.window.destroy()
+
+
+class DesktopApi:
+    """给页面用的接口（管理台自动登录、设置页读写）。属性都带下划线，免得被暴露给网页。"""
+
+    def __init__(self, ctl: Controller):
+        self._ctl = ctl
 
     def token(self) -> str:
-        if not self._used.is_set():
+        if not self._ctl.token_used.is_set():
             log.info("管理台已自动登录")
-        self._used.set()
-        return self._token
+        self._ctl.token_used.set()
+        return self._ctl.backend.app.console.token
 
+    def setup_state(self) -> dict:
+        from .setup import state
+        return state(self._ctl.backend.cfg, self._ctl.root)
 
-def startup_warnings(cfg) -> list[str]:
-    warnings = []
-    if not cfg.llm.api_key:
-        warnings.append("没有设置环境变量 DEEPSEEK_API_KEY，她会被叫醒，但调不了模型。")
-    if not cfg.gate.allow_groups and not cfg.gate.allow_users:
-        warnings.append("config.toml 里允许名单是空的，她谁也不会回。")
-    return warnings
+    def save_setup(self, values: dict) -> dict:
+        from .setup import apply, save
+        ctl = self._ctl
+        cfg, saved, errors = apply(ctl.backend.cfg, values or {})
+        if errors:
+            return {"ok": False, "errors": errors, "message": "有几项要改一下"}
+        try:
+            save(cfg, saved, ctl.root)
+            ctl.restart_backend()
+        except Exception as e:
+            log.exception("保存设置失败")
+            return {"ok": False, "errors": {}, "message": f"保存失败：{e}"}
+        log.info("设置已保存")
+        ctl.warn_if_incomplete()
+        return {"ok": True, "url": ctl.url()}
 
 
 def main():
     if sys.platform != "win32":
         print("桌面版只支持 Windows；别的系统用 python -m xiaojing")
         return
-    from .config import ROOT, load
+    from .config import ROOT
+    from .setup import bundled, ensure_defaults, missing
     try:
-        cfg = load()
-        cfg.data_dir.mkdir(parents=True, exist_ok=True)
+        ROOT.mkdir(parents=True, exist_ok=True)
+        created = ensure_defaults(ROOT)
+        (ROOT / "data").mkdir(exist_ok=True)
     except Exception as e:
-        message_box(f"config.toml 读不了：{e}\n\n位置：{ROOT / 'config.toml'}")
+        message_box(f"准备文件夹失败：{e}\n\n位置：{ROOT}")
         return
-    setup_logging(cfg.data_dir)
+    setup_logging(ROOT / "data")
+    if created:
+        log.info("第一次运行，放好了默认文件：%s（在 %s）", "、".join(created), ROOT)
     if not claim_single_instance():
         show_existing_window()
         return
@@ -147,74 +226,57 @@ def main():
 
     from .tray import Tray
 
-    backend = Backend(cfg)
-    if not backend.start():
-        message_box(f"小鲸没能启动：\n\n{backend.error}")
+    ctl = Controller(ROOT)
+    try:
+        ctl.start_backend()
+    except Exception as e:
+        message_box(f"{e}\n\n配置文件：{ROOT / 'config.toml'}")
         return
-    api = DesktopApi(backend.app.console.token)
-    url = f"http://127.0.0.1:{backend.app.console.server.port}/"
-    window = webview.create_window(TITLE, url, width=1320, height=860, min_size=(960, 640),
-                                   background_color="#080d1a", js_api=api, text_select=True)
-    quitting = threading.Event()
-    hinted = threading.Event()
+    first = bool(missing(ctl.backend.cfg))
+    ctl.window = webview.create_window(TITLE, ctl.url("setup" if first else ""), width=1320, height=860,
+                                       min_size=(960, 640), background_color="#080d1a",
+                                       js_api=DesktopApi(ctl), text_select=True)
+    ctl.window.events.closing += ctl.on_closing
+    ctl.tray = Tray(bundled("assets/launcher.ico"), "小鲸", on_open=ctl.open_window,
+                    on_settings=lambda: ctl.open_window("setup"),
+                    on_pause=lambda: ctl.set_paused(True), on_resume=lambda: ctl.set_paused(False),
+                    on_quit=ctl.quit_all, is_paused=lambda: ctl.backend.app.gate.paused)
+    ctl.tray.start()
+    if not first:
+        ctl.warn_if_incomplete()
 
-    def hide_to_tray():
-        window.hide()
-        if not hinted.is_set():
-            hinted.set()
-            tray.notify("小鲸还在后台", "点右下角的托盘图标就能再打开；右键可以暂停或退出。")
-
-    def on_closing():
-        if quitting.is_set():
-            return True
-        threading.Thread(target=hide_to_tray, daemon=True).start()
-        return False  # 不真关，缩到托盘
-
-    def open_window():
-        window.show()
-        window.restore()
-
-    def quit_all():
-        quitting.set()
-        log.info("从托盘退出")
-        backend.stop()
-        window.destroy()
-
-    def set_paused(paused: bool):
-        backend.call(backend.app.set_paused, paused, "托盘")
-
-    window.events.closing += on_closing
-    tray = Tray(resource("assets/launcher.ico"), "小鲸", on_open=open_window,
-                on_pause=lambda: set_paused(True), on_resume=lambda: set_paused(False),
-                on_quit=quit_all, is_paused=lambda: backend.app.gate.paused)
-    tray.start()
-    for w in startup_warnings(cfg):
-        log.warning(w)
-    if warnings := startup_warnings(cfg):
-        tray.notify("小鲸启动了，但有问题", " ".join(warnings))
-
-    if os.environ.get("XIAOJING_DESKTOP_SELFTEST"):
-        threading.Thread(target=_selftest, args=(window, api, on_closing, open_window, quit_all),
-                         daemon=True).start()
-    log.info("桌面窗口打开：%s", url)
+    if mode := os.environ.get("XIAOJING_DESKTOP_SELFTEST"):
+        threading.Thread(target=_selftest, args=(ctl, mode), daemon=True).start()
+    log.info("桌面窗口打开：%s", ctl.url("setup" if first else ""))
     webview.start(private_mode=True)
-    tray.stop()
-    backend.stop()
+    ctl.tray.stop()
+    ctl.backend.stop()
     log.info("桌面版已退出")
 
 
-def _selftest(window, api, on_closing, open_window, quit_all):
-    """自动走一遍：等自动登录 → 关窗口（应缩到托盘）→ 从托盘打开 → 退出。结果写进日志。"""
-    ok = api._used.wait(20)
+def _selftest(ctl: Controller, mode: str):
+    """自动走一遍，结果写进日志。mode=setup 时先走第一次的设置流程。"""
+    api = DesktopApi(ctl)
+    if mode == "setup":
+        time.sleep(3)
+        log.info("自测：设置页状态 %s", {k: v for k, v in api.setup_state().items() if k != "root"})
+        bad = api.save_setup({"owner_qq": "12", "api_url": "nope"})
+        log.info("自测：故意填错，返回 %s", bad)
+        good = api.save_setup({"owner_qq": "10001", "owner_name": "测试员", "allow_groups": "123456, 234567",
+                               "api_url": "http://127.0.0.1:3020", "token": "t-selftest", "secret": "s-selftest",
+                               "api_key": "sk-selftest", "model": ""})
+        log.info("自测：正确填写，返回 %s", good)
+        ctl.window.load_url(good.get("url", ctl.url()))
+    ok = ctl.token_used.wait(20)
     log.info("自测：自动登录%s", "成功" if ok else "没发生")
     time.sleep(1)
-    log.info("自测：点关闭，返回 %s（False 表示缩到托盘）", on_closing())
+    log.info("自测：点关闭，返回 %s（False 表示缩到托盘）", ctl.on_closing())
     time.sleep(1.5)
-    open_window()
+    ctl.open_window()
     log.info("自测：从托盘打开")
     time.sleep(1.5)
     log.info("自测：退出")
-    quit_all()
+    ctl.quit_all()
 
 
 if __name__ == "__main__":

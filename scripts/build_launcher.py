@@ -18,7 +18,12 @@ def main():
         "--noconsole",
         "--icon", str(ROOT / "assets" / "launcher.ico"),
         "--add-data", f"{ROOT / 'xiaojing' / 'console.html'};xiaojing",
+        "--add-data", f"{ROOT / 'xiaojing' / 'setup.html'};xiaojing",
         "--add-data", f"{ROOT / 'assets' / 'launcher.ico'};assets",
+        # 第一次运行时放到项目文件夹里的默认文件；本机的 config.toml 和 persona.md 不会被打进去
+        "--add-data", f"{ROOT / 'config.example.toml'};.",
+        "--add-data", f"{ROOT / 'persona.default.md'};.",
+        "--add-data", f"{ROOT / 'prompts' / 'system.md'};prompts",
         "--distpath", str(ROOT),
         "--workpath", str(ROOT / "build"),
         "--specpath", str(ROOT / "build"),

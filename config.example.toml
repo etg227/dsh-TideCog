@@ -19,7 +19,8 @@ price_out = 4.0
 peak_multiplier = 2.0   # 工作日 9–12 点、14–18 点按这个倍数算
 
 [gate]
-owner_qq = ""           # 你的 QQ 号。私聊她发「暂停」「继续」只认这个号
+owner_qq = ""           # 你的 QQ 号。私聊她发「暂停」「继续」只认这个号，夜里也只有这个号叫得醒她
+owner_name = "主人"      # 她怎么称呼你，会写进提示词
 allow_groups = []       # 允许她说话的群，比如 ["123456789"]
 allow_users = []        # 允许私聊的 QQ 号
 per_conv_per_minute = 4

@@ -49,7 +49,7 @@ TOOLS = [
          "keyword": {"type": "string", "description": "只看包含这个词的"}}, ["day"]),
     _fn("rest", "这一圈到此为止，过多少分钟再醒。什么都不想做的时候就调它。",
         {"minutes": {"type": "integer", "description": "几分钟后再醒"}}, ["minutes"]),
-    _fn("sleep", "去睡觉，到早上起床时间再醒。睡着时只有主人私聊能叫醒你。"),
+    _fn("sleep", "去睡觉，到早上起床时间再醒。睡着时只有{owner_name}私聊能叫醒你。"),
 ]
 
 
@@ -57,6 +57,7 @@ class Agent:
     def __init__(self, cfg, store, onebot, gate: Gate, llm, system_prompt: str):
         self.cfg, self.store, self.onebot, self.gate, self.llm = cfg, store, onebot, gate, llm
         self.system_prompt = system_prompt
+        self.tools = json.loads(json.dumps(TOOLS, ensure_ascii=False).replace("{owner_name}", cfg.gate.owner_name))
         self.rhythm = Rhythm(cfg.rhythm)
         self.session_path: Path = cfg.data_dir / "session.jsonl"
         self.archive_path: Path = cfg.data_dir / "session-archive.jsonl"
@@ -191,7 +192,7 @@ class Agent:
 
         for _ in range(self.cfg.llm.max_steps):
             try:
-                msg, usage = await self.llm.chat(self._messages(), TOOLS)
+                msg, usage = await self.llm.chat(self._messages(), self.tools)
             except LLMError as e:
                 self.llm_status.update(ok=False, last_ts=time.time(), last_error=str(e))
                 self.store.add_feed("error", f"调模型失败：{e}")
