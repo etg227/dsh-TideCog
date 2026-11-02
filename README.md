@@ -12,7 +12,7 @@
 
 1. 装好 [NapCat](https://github.com/NapNeko/NapCatQQ)，登录一个 **QQ 小号**。
 2. 到 [Releases](https://github.com/etg227/dsh-TideCog/releases) 下载 `launcher.exe`，双击。
-3. 第一次打开是设置页：填你的 QQ 号、允许她说话的群、OneBot 的地址和 token、DeepSeek API key，点「保存并启动」。设置页右边写着 NapCat 那边要怎么配。
+3. 第一次打开是设置页：填你的 QQ 号、允许她说话的群、OneBot 的地址、HTTP token、上报签名密钥和 DeepSeek API key，点「保存并启动」。设置页右边写着 NapCat 那边要怎么配。
 
 不用装 Python，也不用设环境变量。配置和聊天记录存在 `%APPDATA%\xiaojing`，密钥用 Windows 自带的加密保存，只有你这个 Windows 账号能解开。第一次打开时 Windows 可能提示"已保护你的电脑"（exe 没有数字签名），点"更多信息 → 仍要运行"。
 
@@ -64,7 +64,7 @@
 | `scroll` | 在对话里往上翻更早的消息 |
 | `search` | 在聊天记录里搜关键词 |
 | `send` | 发一条 QQ 消息 |
-| `my_log` | 翻自己某一天想过什么、做过什么，包括已经移出上下文的部分 |
+| `my_log` | 翻自己某一天想过什么、做过什么，包括已经移出上下文的部分，按返回的 before 继续向前翻页 |
 | `rest` | 这一圈到此为止，自己定几分钟后再醒 |
 | `sleep` | 去睡觉，到早上再醒 |
 
