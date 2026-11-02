@@ -35,6 +35,8 @@ async def main():
         cfg.onebot.api_url = f"http://127.0.0.1:{qq_server.port}"
         cfg.onebot.secret = ""
         cfg.console.port = 5319
+        cfg.inbox.group_batch_seconds = 30
+        cfg.rhythm.sleep_start, cfg.rhythm.wake_time = "00:30", "08:30"
         app = App(cfg, llm=FakeLLM(SCRIPT), system_prompt="演示")
         await app.start()
 

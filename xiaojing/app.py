@@ -24,10 +24,12 @@ class PortInUse(Exception):
 PROBE_EVERY = 60  # 秒
 
 
-def load_system_prompt() -> str:
-    """框架规矩 + 人设。两份都是固定文本，放在最前面，好命中缓存。"""
+def load_system_prompt(cfg: Config) -> str:
+    """框架规矩 + 人设 + 主人是哪个号。都是固定文本，放在最前面，好命中缓存。"""
     parts = [(ROOT / "prompts" / "system.md").read_text(encoding="utf-8"),
              (ROOT / "persona.md").read_text(encoding="utf-8")]
+    if owner := cfg.gate.owner_qq:
+        parts.append(f"## 认人\n- 主人的 QQ 号是 {owner}，你们的私聊是 private:{owner}。")
     return "\n\n".join(p.strip() for p in parts)
 
 
@@ -40,7 +42,7 @@ class App:
         self.onebot = OneBot(cfg.onebot)
         self.gate = Gate(cfg.gate)
         self.agent = Agent(cfg, self.store, self.onebot, self.gate, llm or DeepSeek(cfg.llm),
-                           system_prompt if system_prompt is not None else load_system_prompt())
+                           system_prompt if system_prompt is not None else load_system_prompt(cfg))
         self.receiver = Server(cfg.onebot.listen_host, cfg.onebot.listen_port, self.on_onebot)
         self.console = Console(cfg, self)
         self._tasks: list[asyncio.Task] = []
@@ -107,6 +109,7 @@ class App:
         owner = self.cfg.gate.owner_qq
         if owner and conv == f"private:{owner}" and m["text"] in OWNER_COMMANDS:
             paused = OWNER_COMMANDS[m["text"]]
+            self.store.mark_read(conv)  # 指令是给系统的，不算她的未读
             self.set_paused(paused, "主人私聊")
             try:  # 这是系统回执，不经过她，也不受闸门限制
                 await self.onebot.send_text(conv, "已暂停。私聊发「继续」恢复。" if paused else "继续了。")
@@ -119,7 +122,8 @@ class App:
             self.agent.wake(conv, "私聊")
         elif m["mentions_me"]:
             self.agent.wake(conv, "有人 @ 你")
-        # 群里的普通消息第 1 步先只存不叫醒；第 2 步的收件箱再决定什么时候看
+        else:
+            self.agent.note_group(conv)
 
     async def _probe_loop(self):
         while True:

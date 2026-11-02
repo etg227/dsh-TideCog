@@ -4,17 +4,18 @@ import json
 import tempfile
 import time
 import unittest
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
-from xiaojing.agent import WAKE_MARK, Agent
-from xiaojing.config import load
+from xiaojing.agent import WAKE_MARK, Agent, my_log_lines, parse_day
+from xiaojing.config import RhythmConfig, load
 from xiaojing.gate import Gate
 from xiaojing.onebot import OneBot, parse_message_event
 from xiaojing.prices import BJ, cost, is_peak
+from xiaojing.rhythm import Rhythm
 from xiaojing.store import Store
 
-from .helpers import SELF_ID, group_event, make_cfg, private_event
+from .helpers import OWNER, SELF_ID, group_event, make_cfg, private_event, tool_call
 
 
 def bj(*args):
@@ -123,6 +124,18 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(s.unread("group:111"), 0)
         self.assertEqual([r["text"] for r in s.recent("group:111", 2)], ["我说的", "第三条消息"])
 
+    def test_inbox_and_scroll(self):
+        s = self.store
+        ids = [s.add_event("group:111", f"第{i}条", sender_name="阿北", ts=1000 + i) for i in range(5)]
+        s.add_event("private:1000", "在吗", sender_name="主人", mentions_me=False, ts=2000)
+        s.add_event("group:111", "@小鲸", sender_name="阿南", mentions_me=True, ts=1500)
+        box = s.inbox(["group:111", "private:1000", "group:222"])
+        self.assertEqual([x["conv"] for x in box], ["private:1000", "group:111"])  # 新的在前
+        self.assertEqual(box[1]["unread"], 6)
+        self.assertTrue(box[1]["mentioned"])
+        self.assertEqual(box[1]["last_sender"], "阿南")
+        self.assertEqual([r["text"] for r in s.before("group:111", ids[3], 2)], ["第1条", "第2条"])
+
     def test_search(self):
         s = self.store
         s.add_event("group:111", "周末一起去爬山吗")
@@ -140,8 +153,145 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(today["hit_rate"], 0.9)
 
 
+class RhythmTest(unittest.TestCase):
+    def test_window_inside_one_day(self):
+        r = Rhythm(RhythmConfig(sleep_start="00:30", wake_time="08:30"))
+        self.assertTrue(r.sleeping(bj(2026, 11, 2, 3, 0)))
+        self.assertFalse(r.sleeping(bj(2026, 11, 2, 0, 29)))
+        self.assertFalse(r.sleeping(bj(2026, 11, 2, 8, 30)))
+        self.assertEqual(r.next_wake(bj(2026, 11, 2, 3, 0)), bj(2026, 11, 2, 8, 30))
+        self.assertEqual(r.next_wake(bj(2026, 11, 2, 9, 0)), bj(2026, 11, 3, 8, 30))
+
+    def test_window_across_midnight(self):
+        r = Rhythm(RhythmConfig(sleep_start="23:30", wake_time="07:00"))
+        self.assertTrue(r.sleeping(bj(2026, 11, 2, 23, 45)))
+        self.assertTrue(r.sleeping(bj(2026, 11, 3, 6, 59)))
+        self.assertFalse(r.sleeping(bj(2026, 11, 3, 7, 0)))
+        self.assertFalse(r.sleeping(bj(2026, 11, 3, 15, 0)))
+
+    def test_sleep_early_and_empty_window(self):
+        r = Rhythm(RhythmConfig(sleep_start="00:00", wake_time="00:00"))
+        self.assertFalse(r.sleeping(bj(2026, 11, 2, 3, 0)))
+        r.sleep_until = bj(2026, 11, 2, 8, 30)
+        self.assertTrue(r.sleeping(bj(2026, 11, 2, 3, 0)))
+        self.assertFalse(r.sleeping(bj(2026, 11, 2, 8, 30)))
+
+
+class AgentTestBase(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cfg = make_cfg(self.tmp.name)
+        self.store = Store(Path(self.tmp.name) / "e.db")
+        self.agent = Agent(self.cfg, self.store, OneBot(self.cfg.onebot), Gate(self.cfg.gate), None, "设定")
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+
+class WakeRulesTest(AgentTestBase):
+    def test_group_messages_are_batched_and_spaced(self):
+        a = self.agent
+        self.cfg.inbox.group_batch_seconds, self.cfg.inbox.group_min_interval = 30, 180
+        a.note_group("group:111", now=1000)
+        a.note_group("group:111", now=1010)          # 已经在攒了，不重新计时
+        self.assertEqual(a.group_due["group:111"], 1030)
+        self.assertEqual(a._take_ready(1020), ({}, None))
+        self.assertEqual(a._take_ready(1031), ({"group:111": "群里有新消息"}, "message"))
+        a.note_group("group:111", now=1040)          # 刚看过，最早 1031+180 才能再叫
+        self.assertEqual(a.group_due["group:111"], 1211)
+
+    def test_mention_cancels_batch_and_is_immediate(self):
+        a = self.agent
+        a.note_group("group:111", now=time.time())
+        a.wake("group:111", "有人 @ 你")
+        self.assertNotIn("group:111", a.group_due)
+        self.assertEqual(a._take_ready(time.time())[1], "message")
+
+    def test_only_owner_wakes_her_at_night(self):
+        a = self.agent
+        a.rhythm.sleep_until = time.time() + 3600
+        a.wake("group:111", "有人 @ 你")
+        a.wake(f"private:{OWNER}", "私聊")
+        ready, kind = a._take_ready(time.time())
+        self.assertEqual((ready, kind), ({f"private:{OWNER}": "私聊"}, "message"))
+        self.assertIn("group:111", a.pending)        # 留到早上
+        a.rhythm.sleep_until = 0
+        ready, kind = a._take_ready(time.time())
+        self.assertEqual(kind, "morning")
+        self.assertIn("group:111", ready)
+
+    def test_heartbeat_when_due(self):
+        a = self.agent
+        self.assertEqual(a._take_ready(time.time()), ({}, None))
+        a.next_heartbeat = time.time() - 1
+        self.assertEqual(a._take_ready(time.time()), ({}, "heartbeat"))
+
+
+class ToolsTest(AgentTestBase):
+    def run_tool(self, name, **args):
+        import asyncio
+        return asyncio.run(self.agent._run_tool(tool_call("t", name, **args)))
+
+    def test_inbox_scroll_search_respect_allow_list(self):
+        s = self.store
+        ids = [s.add_event("group:111", f"爬山计划第{i}条", sender_name="阿北") for i in range(3)]
+        s.add_event("group:999", "爬山计划不该被看到", sender_name="外人")
+        self.assertIn("group:111：3 条未读", self.run_tool("inbox"))
+        self.assertNotIn("999", self.run_tool("inbox"))
+        self.assertIn(f"#{ids[0]}", self.run_tool("scroll", conv="group:111", before=ids[2]))
+        self.assertIn("翻不了", self.run_tool("scroll", conv="group:999", before=100))
+        found = self.run_tool("search", query="爬山计划")
+        self.assertIn("第0条", found)
+        self.assertNotIn("不该被看到", found)
+
+    def test_rest_clamps_and_ends_turn(self):
+        out = self.run_tool("rest", minutes=1)        # 最少 5 分钟
+        self.assertIn("5 分钟", out)
+        self.assertTrue(self.agent._turn_end)
+        self.assertAlmostEqual(self.agent._rest_until, time.time() + 300, delta=2)
+
+    def test_sleep_refused_in_daytime(self):
+        a = self.agent
+        self.cfg.rhythm.wake_time = datetime.fromtimestamp(time.time() - 600, BJ).strftime("%H:%M")
+        self.assertIn("还早", self.run_tool("sleep"))  # 起床时间刚过，睡下去要一整天
+        self.assertEqual(a.rhythm.sleep_until, 0)
+        self.cfg.rhythm.wake_time = datetime.fromtimestamp(time.time() + 3 * 3600, BJ).strftime("%H:%M")
+        self.assertIn("晚安", self.run_tool("sleep"))
+        self.assertTrue(a.rhythm.sleeping(time.time()))
+
+
+class MyLogTest(unittest.TestCase):
+    def test_parse_day(self):
+        now = bj(2026, 11, 2, 15, 0)
+        self.assertEqual(parse_day("今天", now), date(2026, 11, 2))
+        self.assertEqual(parse_day("昨天", now), date(2026, 11, 1))
+        self.assertEqual(parse_day("10-31", now), date(2026, 10, 31))
+        self.assertEqual(parse_day("2025-12-24", now), date(2025, 12, 24))
+        self.assertIsNone(parse_day("上周", now))
+        self.assertIsNone(parse_day("13-40", now))
+
+    def test_lines_for_one_day(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "a.jsonl"
+            rows = [
+                {"ts": bj(2026, 11, 1, 22, 0), "role": "user", "content": f"{WAKE_MARK} 11-01 22:00】心跳"},
+                {"ts": bj(2026, 11, 2, 9, 0), "role": "user", "content": f"{WAKE_MARK} 11-02 09:00】早上了\n收件箱是空的。"},
+                {"ts": bj(2026, 11, 2, 9, 0), "role": "assistant", "content": "想去看看群里",
+                 "tool_calls": [tool_call("x", "open", conv="group:111")]},
+                {"ts": bj(2026, 11, 2, 9, 1), "role": "tool", "tool_call_id": "x", "content": "很长的聊天记录"},
+            ]
+            p.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+            lines = my_log_lines(p, date(2026, 11, 2))
+            self.assertEqual(len(lines), 3)
+            self.assertTrue(lines[0].startswith("[09:00] 被叫醒"))
+            self.assertNotIn("收件箱", lines[0])         # 只留第一行
+            self.assertFalse(any("很长的聊天记录" in x for x in lines))
+            self.assertEqual(len(my_log_lines(p, date(2026, 11, 2), "群里")), 1)
+
+
 class EvictTest(unittest.TestCase):
-    def test_moves_oldest_third_and_keeps_archive(self):
+    def test_moves_oldest_third_when_over_budget(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = make_cfg(tmp)
             store = Store(Path(tmp) / "e.db")
@@ -149,13 +299,18 @@ class EvictTest(unittest.TestCase):
             for i in range(31):
                 agent._append({"role": "user", "content": f"{WAKE_MARK} 第{i}圈】"})
                 agent._append({"role": "assistant", "content": "嗯"})
+            agent.last_prompt_tokens = cfg.context_budget       # 刚好到上限，不移
+            agent._evict_if_needed()
+            self.assertEqual(agent.turn_count(), 31)
+            agent.last_prompt_tokens = cfg.context_budget + 1
             agent._evict_if_needed()
             self.assertEqual(agent.turn_count(), 21)
             self.assertTrue(agent.history[0]["content"].startswith(f"{WAKE_MARK} 第10圈"))
             on_disk = agent.session_path.read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(on_disk), len(agent.history))
-            archive = agent.archive_path.read_text(encoding="utf-8").splitlines()
+            archive = [json.loads(x) for x in agent.archive_path.read_text(encoding="utf-8").splitlines()]
             self.assertEqual(len(archive), 62)
+            self.assertIn("ts", archive[0])
             reloaded = Agent(cfg, store, None, Gate(cfg.gate), None, "设定")
             self.assertEqual(reloaded.history, agent.history)
             store.close()
@@ -165,13 +320,16 @@ class ConfigTest(unittest.TestCase):
     def test_numbers_become_strings_and_secrets_from_env(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "config.toml"
-            p.write_text('[gate]\nowner_qq = 1000\nallow_groups = [111, "222"]\n', encoding="utf-8")
+            p.write_text('max_turns = 30\n[gate]\nowner_qq = 1000\nallow_groups = [111, "222"]\n'
+                         '[rhythm]\nwake_time = "09:00"\n', encoding="utf-8")
             cfg = load(p, env={"DEEPSEEK_API_KEY": "k", "ONEBOT_TOKEN": "t"})
             self.assertEqual(cfg.gate.owner_qq, "1000")
             self.assertEqual(cfg.gate.allow_groups, ["111", "222"])
             self.assertEqual(cfg.llm.api_key, "k")
             self.assertEqual(cfg.onebot.token, "t")
             self.assertEqual(cfg.onebot.secret, "")
+            self.assertEqual(cfg.rhythm.wake_time, "09:00")
+            self.assertEqual(cfg.inbox.group_batch_seconds, 30)
 
 
 if __name__ == "__main__":

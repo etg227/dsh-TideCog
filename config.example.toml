@@ -1,7 +1,7 @@
 # 复制一份改名成 config.toml 再改。密钥不写在这里，见 README 的「设置密钥」。
 
 data_dir = "data"
-max_turns = 30          # 会话里最多留几圈；超了把最旧的三分之一整块移进存档
+context_budget = 64000  # 上下文上限（token，按上一次调用的实际输入算）；超了把最旧的三分之一圈整块移进存档
 
 [onebot]
 api_url = "http://127.0.0.1:3020"   # 测试号 SnowLuma 的 HTTP 服务器
@@ -29,3 +29,14 @@ max_text_len = 500
 [console]
 host = "127.0.0.1"
 port = 5310
+
+[inbox]
+group_batch_seconds = 30   # 群里没 @ 她的消息，攒多少秒再叫醒她
+group_min_interval = 180   # 同一个群，普通消息最快多少秒叫醒她一次
+
+[rhythm]
+heartbeat_default = 30     # 她没说下次几分钟醒，就按这个（分钟）
+heartbeat_min = 5          # 她 rest 时能选的最短、最长间隔（分钟）
+heartbeat_max = 120
+sleep_start = "00:30"      # 北京时间。睡着时只有你私聊能叫醒她，其他消息攒到早上
+wake_time = "08:30"
