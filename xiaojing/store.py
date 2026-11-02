@@ -93,6 +93,29 @@ class Store:
         row = self.db.execute("SELECT last_id FROM reads WHERE conv = ?", (conv,)).fetchone()
         return row[0] if row else 0
 
+    def before(self, conv, before_id, n=20) -> list[sqlite3.Row]:
+        """往上翻：比 before_id 更早的 n 条。"""
+        rows = self.db.execute(
+            "SELECT * FROM events WHERE conv = ? AND id < ? ORDER BY id DESC LIMIT ?", (conv, before_id, n)
+        ).fetchall()
+        return rows[::-1]
+
+    def inbox(self, convs) -> list[dict]:
+        """这些会话里有未读的：几条、最新一条的时间和发言人、有没有人 @ 她。"""
+        out = []
+        for conv in convs:
+            row = self.db.execute(
+                "SELECT COUNT(*), MAX(ts), MAX(mentions_me) FROM events WHERE conv = ? AND id > ? AND mine = 0",
+                (conv, self._last_read(conv)),
+            ).fetchone()
+            if row[0]:
+                last = self.db.execute(
+                    "SELECT sender_name FROM events WHERE conv = ? AND mine = 0 ORDER BY id DESC LIMIT 1", (conv,)
+                ).fetchone()
+                out.append({"conv": conv, "unread": row[0], "last_ts": row[1], "mentioned": bool(row[2]),
+                            "last_sender": last[0] if last else ""})
+        return sorted(out, key=lambda x: -x["last_ts"])
+
     def search(self, query, conv=None, limit=20) -> list[sqlite3.Row]:
         """全文检索。trigram 至少要三个字，更短的退回到 LIKE。"""
         query = query.strip()

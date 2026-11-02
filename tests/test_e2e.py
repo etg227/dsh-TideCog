@@ -4,12 +4,13 @@ import hashlib
 import hmac
 import json
 import tempfile
+import time
 import unittest
 
 from xiaojing.app import App, PortInUse
 from xiaojing.httpserver import Server
 
-from .helpers import (GROUP, SELF_ID, FakeLLM, FakeQQ, group_event, http, make_cfg, private_event,
+from .helpers import (GROUP, OWNER, SELF_ID, FakeLLM, FakeQQ, group_event, http, make_cfg, private_event,
                       tool_call, wait_for)
 
 REPLY_SCRIPT = [
@@ -65,11 +66,44 @@ class EndToEndTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn(k, kinds)
         self.assertEqual(self.app.onebot.self_id, str(SELF_ID))  # 探活拿到了自己的号
 
-    async def test_plain_group_message_does_not_wake(self):
-        self.assertEqual(await self.post(group_event("大家好", at_me=False)), 204)
+    async def test_plain_group_messages_are_batched(self):
+        self.llm.script = [{"content": "大家在打招呼，看看就好",
+                            "tool_calls": [tool_call("r", "rest", minutes=30)]}]
+        await self.post(group_event("大家好", at_me=False))
+        await self.post(group_event("早", at_me=False))
+        await asyncio.sleep(0.1)
+        self.assertEqual(self.llm.seen, [])                     # 还在攒
+        self.assertTrue(await wait_for(lambda: self.llm.seen))  # 0.3 秒后叫醒
+        await wait_for(lambda: not self.app.agent.running)
+        self.assertEqual(len(self.llm.seen), 1)                 # 一次叫醒看两条
+        self.assertIn(f"group:{GROUP}：2 条未读（群里有新消息）", self.llm.seen[0][1]["content"])
+        self.assertEqual(self.qq.sends(), [])
+
+    async def test_rest_ends_turn_and_sets_next_heartbeat(self):
+        self.llm.script = [{"content": "", "tool_calls": [tool_call("r", "rest", minutes=10)]}]
+        self.app.agent.next_heartbeat = 0
+        self.app.agent.nudge()
+        self.assertTrue(await wait_for(lambda: self.llm.seen))
+        await wait_for(lambda: not self.app.agent.running)
+        first = self.llm.seen[0][1]["content"]
+        self.assertIn("心跳", first)
+        self.assertIn("收件箱是空的", first)
+        self.assertEqual(len(self.llm.seen), 1)  # rest 之后不再多调一次
+        self.assertAlmostEqual(self.app.agent.next_heartbeat, time.time() + 600, delta=5)
+        self.assertEqual(self.app.agent.idle_streak, 1)
+
+    async def test_night_only_owner_gets_through(self):
+        self.app.agent.rhythm.sleep_until = time.time() + 3600
+        await self.post(group_event("小鲸醒醒"))
         await asyncio.sleep(0.3)
         self.assertEqual(self.llm.seen, [])
-        self.assertEqual(len(self.app.store.recent(f"group:{GROUP}")), 1)  # 但存下来了
+        self.llm.script = [{"content": "主人半夜找我", "tool_calls": [tool_call("r", "rest", minutes=60)]}]
+        await self.post(private_event("睡了吗"))
+        self.assertTrue(await wait_for(lambda: self.llm.seen))
+        await wait_for(lambda: not self.app.agent.running)
+        self.assertIn(f"private:{OWNER}", self.llm.seen[0][1]["content"])
+        self.assertNotIn(f"group:{GROUP}：", self.llm.seen[0][1]["content"].split("收件箱")[0])
+        self.assertIn(f"group:{GROUP}", self.app.agent.pending)  # 群里那条留到早上
 
     async def test_bad_signature_rejected(self):
         self.assertEqual(await self.post(group_event(), secret="wrong"), 401)
@@ -91,6 +125,7 @@ class EndToEndTest(unittest.IsolatedAsyncioTestCase):
     async def test_owner_can_pause_and_resume(self):
         await self.post(private_event("暂停"))
         self.assertTrue(self.app.gate.paused)
+        self.assertEqual(self.app.store.unread(f"private:{OWNER}"), 0)  # 指令不进她的收件箱
         self.assertIn("已暂停", self.qq.sends("send_private_msg")[0]["message"][0]["data"]["text"])
 
         await self.post(group_event())

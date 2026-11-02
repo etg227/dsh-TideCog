@@ -49,6 +49,8 @@
   .badge.run i { background: var(--teal); box-shadow: 0 0 0 0 var(--teal); animation: ping 1.4s ease-out infinite; }
   .badge.paused { border-color: var(--amber); color: var(--amber); }
   .badge.paused i { background: var(--amber); }
+  .badge.sleep { border-color: var(--violet); color: var(--violet); }
+  .badge.sleep i { background: var(--violet); }
   @keyframes ping { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--teal) 70%, transparent); } 100% { box-shadow: 0 0 0 9px transparent; } }
 
   .toggle { cursor: pointer; padding: 9px 22px; border-radius: 10px; font-weight: 700; letter-spacing: .08em; transition: background .15s, color .15s; }
@@ -145,21 +147,30 @@
   <div class="main">
     <section class="panel">
       <h2>她在干嘛 <small>最新的在下面，每 2 秒刷新</small></h2>
-      <ol class="feed" id="feed"><li class="empty">还没有动静。有人在允许的群里 @ 她，或者私聊她，这里就会动起来。</li></ol>
+      <ol class="feed" id="feed"><li class="empty">还没有动静。有人找她、群里攒了消息，或者心跳到点，这里就会动起来。</li></ol>
     </section>
 
     <div class="side">
       <section class="panel">
-        <h2>待处理</h2>
-        <div class="rows" id="pending"><p class="note">没有积压。</p></div>
+        <h2>收件箱 <small>只算名单里的对话</small></h2>
+        <div class="rows" id="pending"><p class="note">没有未读。</p></div>
+      </section>
+      <section class="panel">
+        <h2>节奏</h2>
+        <div class="rows">
+          <div class="row"><span>下次自己醒</span><b id="nextBeat">—</b></div>
+          <div class="row"><span>连着没说话</span><b id="idle">0 圈</b></div>
+          <div class="row"><span>作息</span><b id="sleepWin">—</b></div>
+        </div>
       </section>
       <section class="panel">
         <h2>上下文 <small>只移出，不总结</small></h2>
         <div class="rows">
-          <div class="row"><span>会话里留着的圈数</span><b id="turns">0 / 30</b></div>
-          <div class="meter"><i id="turnsBar" style="width: 0%"></i></div>
+          <div class="row"><span>上一次调用的输入</span><b id="tokens">—</b></div>
+          <div class="meter"><i id="tokenBar" style="width: 0%"></i></div>
+          <div class="row"><span>会话里留着的圈数</span><b id="turns">0</b></div>
           <div class="row"><span>消息条数</span><b id="msgs">0</b></div>
-          <p class="note">超过上限，就把最旧的三分之一整块移进存档。</p>
+          <p class="note">输入超过上限，就把最旧的三分之一圈整块移进存档，她用 my_log 还翻得到。</p>
         </div>
       </section>
       <section class="panel">
@@ -173,7 +184,6 @@
       <section class="panel">
         <h2>后面几步</h2>
         <ul class="roadmap">
-          <li><b>收件箱、心跳、作息</b><span>第 2 步</span></li>
           <li><b>记忆树</b><span>第 3 步</span></li>
           <li><b>念头和思绪板</b><span>第 4 步</span></li>
           <li><b>按场景挑语气</b><span>第 5 步</span></li>
@@ -219,6 +229,13 @@ function ago(ts, now) {
   if (s < 86400) return `${Math.floor(s / 3600)} 小时前`;
   return hhmm(ts);
 }
+function inTime(ts, now) {
+  const s = ts - now;
+  if (s <= 0) return '马上';
+  if (s < 60) return `${Math.round(s)} 秒后`;
+  if (s < 3600) return `${Math.round(s / 60)} 分钟后（${hhmm(ts)}）`;
+  return hhmm(ts);
+}
 function duration(s) {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
   return h ? `运行了 ${h} 小时 ${m} 分` : `运行了 ${m} 分钟`;
@@ -236,8 +253,9 @@ function render(s) {
   const now = s.now;
 
   const badge = $('badge');
-  badge.className = 'badge ' + (s.paused ? 'paused' : s.running ? 'run' : 'wait');
-  badge.querySelector('span').textContent = s.paused ? '已暂停' : s.running ? '正在想' : '在等消息';
+  const mode = s.paused ? 'paused' : s.running ? 'run' : s.rhythm.sleeping ? 'sleep' : 'wait';
+  badge.className = 'badge ' + mode;
+  badge.querySelector('span').textContent = { paused: '已暂停', run: '正在想', sleep: '睡觉中', wait: '在等消息' }[mode];
   const t = $('toggle');
   t.className = 'toggle ' + (s.paused ? 'resume' : 'pause');
   t.textContent = s.paused ? '继续' : '暂停';
@@ -268,7 +286,7 @@ function render(s) {
   if (!s.feed.length) {
     const li = document.createElement('li');
     li.className = 'empty';
-    li.textContent = '还没有动静。有人在允许的群里 @ 她，或者私聊她，这里就会动起来。';
+    li.textContent = '还没有动静。有人找她、群里攒了消息，或者心跳到点，这里就会动起来。';
     feed.append(li);
   }
   for (const f of [...s.feed].reverse()) {
@@ -296,24 +314,33 @@ function render(s) {
 
   const pending = $('pending');
   pending.replaceChildren();
-  if (!s.pending.length) {
+  const convs = new Map(s.inbox.map((x) => [x.conv, `${x.unread} 条未读${x.mentioned ? ' · 有人 @' : ''}`]));
+  for (const p of s.pending) convs.set(p.conv, (convs.get(p.conv) || p.reason) + ' · 马上看');
+  for (const g of s.group_due) convs.set(g.conv, (convs.get(g.conv) || '有新消息') + ` · ${inTime(g.due, now)}看`);
+  if (!convs.size) {
     const p = document.createElement('p');
     p.className = 'note';
-    p.textContent = s.paused ? '暂停中，有消息会先攒着。' : '没有积压。';
+    p.textContent = '没有未读。';
     pending.append(p);
   }
-  for (const p of s.pending) {
+  for (const [conv, text] of convs) {
     const row = document.createElement('div');
     row.className = 'row';
-    const a = document.createElement('span'); a.textContent = p.conv;
-    const b = document.createElement('b'); b.textContent = p.reason;
+    const a = document.createElement('span'); a.textContent = conv;
+    const b = document.createElement('b'); b.textContent = text;
     row.append(a, b);
     pending.append(row);
   }
 
+  const r = s.rhythm;
+  $('nextBeat').textContent = s.paused ? '暂停中' : r.sleeping ? `睡着，${hhmm(r.next_wake)} 醒` : inTime(r.next_heartbeat, now);
+  $('idle').textContent = `${r.idle_streak} 圈`;
+  $('sleepWin').textContent = `${r.sleep_start} – ${r.wake_time} 睡`;
+
   const cx = s.context;
-  $('turns').textContent = `${cx.turns} / ${cx.max_turns}`;
-  $('turnsBar').style.width = Math.min(100, cx.turns / cx.max_turns * 100) + '%';
+  $('tokens').textContent = `${cx.tokens ? cx.tokens.toLocaleString() : '—'} / ${cx.budget.toLocaleString()}`;
+  $('tokenBar').style.width = Math.min(100, cx.tokens / cx.budget * 100) + '%';
+  $('turns').textContent = cx.turns;
   $('msgs').textContent = cx.messages;
 
   for (const [id, list] of [['groups', s.allow.groups], ['users', s.allow.users]]) {

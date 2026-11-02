@@ -49,13 +49,31 @@ class ConsoleConfig:
 
 
 @dataclass
+class InboxConfig:
+    group_batch_seconds: float = 30   # 群里没 @ 她的消息，攒多久再叫醒她
+    group_min_interval: float = 180   # 同一个群，普通消息最快多久叫醒她一次
+
+
+@dataclass
+class RhythmConfig:
+    heartbeat_default: float = 30  # 她没说下次几分钟醒，就按这个（分钟）
+    heartbeat_min: float = 5
+    heartbeat_max: float = 120
+    sleep_start: str = "00:30"     # 北京时间；睡着时只有主人私聊能叫醒她
+    wake_time: str = "08:30"
+
+
+@dataclass
 class Config:
     data_dir: Path
     onebot: OneBotConfig
     llm: LLMConfig
     gate: GateConfig
     console: ConsoleConfig
-    max_turns: int = 30  # 会话里最多留几圈，超了把最旧的三分之一整块移进存档
+    inbox: InboxConfig = field(default_factory=InboxConfig)
+    rhythm: RhythmConfig = field(default_factory=RhythmConfig)
+    # 上下文上限（token，按上一次调用的实际输入算）。超了就把最旧的三分之一整块移进存档
+    context_budget: int = 64000
 
 
 def load(path: Path | None = None, env: dict | None = None) -> Config:
@@ -84,5 +102,7 @@ def load(path: Path | None = None, env: dict | None = None) -> Config:
         llm=llm,
         gate=gate,
         console=ConsoleConfig(**raw.get("console", {})),
-        max_turns=int(raw.get("max_turns", 30)),
-    )
+        inbox=InboxConfig(**raw.get("inbox", {})),
+        rhythm=RhythmConfig(**raw.get("rhythm", {})),
+        context_budget=int(raw.get("context_budget", 64000)),
+    )  # 第 1 步的 max_turns 已经不用了，旧配置里留着也没关系

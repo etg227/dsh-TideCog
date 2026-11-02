@@ -5,7 +5,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from xiaojing.config import Config, ConsoleConfig, GateConfig, LLMConfig, OneBotConfig
+from xiaojing.config import (Config, ConsoleConfig, GateConfig, InboxConfig, LLMConfig, OneBotConfig,
+                             RhythmConfig)
 from xiaojing.httpserver import json_response
 
 SELF_ID = 9999
@@ -20,7 +21,10 @@ def make_cfg(tmp) -> Config:
         llm=LLMConfig(),
         gate=GateConfig(owner_qq=OWNER, allow_groups=[GROUP], allow_users=[OWNER, "2000"]),
         console=ConsoleConfig(port=0),
-        max_turns=30,
+        # 测试里群消息只攒 0.3 秒；心跳一小时，测试期间不会自己响；作息窗口为空，永远醒着
+        inbox=InboxConfig(group_batch_seconds=0.3, group_min_interval=0),
+        rhythm=RhythmConfig(heartbeat_default=60, sleep_start="00:00", wake_time="00:00"),
+        context_budget=64000,
     )
 
 

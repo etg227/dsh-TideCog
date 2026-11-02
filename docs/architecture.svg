@@ -40,7 +40,7 @@
   <text x="54" y="244" class="h">收件箱</text>
   <text x="54" y="268" class="s">只告诉她哪些对话有未读</text>
 
-  <rect class="plan" x="36" y="318" width="220" height="76" rx="12"/>
+  <rect class="box" x="36" y="318" width="220" height="76" rx="12"/>
   <text x="54" y="348" class="h">心跳 · 作息</text>
   <text x="54" y="372" class="s">没人找她也会醒，夜里睡觉</text>
 
@@ -49,7 +49,7 @@
   <text x="54" y="476" class="s">发呆久了冒出想法，想试试</text>
 
   <path class="line" d="M256 252 H286 V300 H316" stroke="#5fe3d0" marker-end="url(#aT)"/>
-  <path class="line" d="M256 356 H286 V300" stroke="#8290b0" stroke-dasharray="5 4"/>
+  <path class="line" d="M256 356 H286 V300" stroke="#5fe3d0"/>
   <path class="line" d="M256 460 H286 V356" stroke="#8290b0" stroke-dasharray="5 4"/>
   <text x="261" y="296" class="m">叫醒</text>
 
@@ -108,9 +108,9 @@
   <rect class="box" x="760" y="380" width="204" height="118" rx="12"/>
   <text x="778" y="406" class="h">她能用的工具</text>
   <text x="778" y="430" class="mono" style="fill: #5fe3d0">open · send</text>
-  <text x="778" y="452" class="mono" style="fill: #f2c374">inbox · scroll · search</text>
-  <text x="778" y="474" class="mono" style="fill: #f2c374">rest · sleep · my_log</text>
-  <text x="778" y="490" class="m" style="font-size: 11px">青色：已做好　黄色：开发中</text>
+  <text x="778" y="452" class="mono" style="fill: #5fe3d0">inbox · scroll · search</text>
+  <text x="778" y="474" class="mono" style="fill: #5fe3d0">rest · sleep · my_log</text>
+  <text x="778" y="490" class="m" style="font-size: 11px">记忆和子代理的工具还在规划</text>
 
   <rect class="plan" x="760" y="110" width="204" height="110" rx="12"/>
   <text x="778" y="138" class="h">子代理</text>
