@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 560" width="1000" height="560" role="img" aria-labelledby="t d">
+  <title id="t">小鲸的简易框架图</title>
+  <desc id="d">QQ 消息进收件箱，叫醒唯一的会话；她转一圈：读取上下文、思考与选择、执行反应、更新记忆；想说的话过权限闸门再发回 QQ。</desc>
+  <defs>
+    <marker id="aT" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5fe3d0"/></marker>
+    <marker id="aA" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#f2c374"/></marker>
+    <marker id="aM" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8290b0"/></marker>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#5fe3d0" stop-opacity=".28"/>
+      <stop offset="1" stop-color="#5fe3d0" stop-opacity="0"/>
+    </radialGradient>
+    <style>
+      text { font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", sans-serif; }
+      .h { font-size: 15px; font-weight: 700; fill: #e9eef8; }
+      .s { font-size: 12px; fill: #c3cce0; }
+      .m { font-size: 12px; fill: #8290b0; }
+      .mono { font-family: Consolas, "JetBrains Mono", monospace; font-size: 12.5px; }
+      .box { fill: #131e36; stroke: #2b3b5e; }
+      .plan { fill: #0f1729; stroke: #8290b0; stroke-dasharray: 5 4; }
+      .line { fill: none; stroke-width: 1.8; }
+    </style>
+  </defs>
+
+  <rect width="1000" height="560" rx="18" fill="#0b1223"/>
+  <text x="36" y="50" class="h" style="font-size: 22px">小鲸 · 一个会话，一直在转</text>
+  <text x="36" y="76" class="m">实线：已经做好　虚线：开发中或规划中</text>
+
+  <!-- 发出去的路 -->
+  <path class="line" d="M964 300 H984 V96 H146 V108" stroke="#f2c374" marker-end="url(#aA)"/>
+  <path class="line" d="M862 243 V224" stroke="#8290b0" stroke-dasharray="5 4" marker-end="url(#aM)"/>
+  <text x="560" y="88" class="s" text-anchor="middle" style="fill: #f2c374">send：说出口的话发回 QQ</text>
+
+  <!-- 左边：叫醒她的东西 -->
+  <rect class="box" x="36" y="110" width="220" height="76" rx="12"/>
+  <text x="54" y="140" class="h">QQ 群聊 · 私聊</text>
+  <text x="54" y="164" class="m">OneBot v11 · NapCat / SnowLuma</text>
+  <path class="line" d="M146 188 V212" stroke="#5fe3d0" marker-end="url(#aT)"/>
+
+  <rect class="box" x="36" y="214" width="220" height="76" rx="12"/>
+  <text x="54" y="244" class="h">收件箱</text>
+  <text x="54" y="268" class="s">只告诉她哪些对话有未读</text>
+
+  <rect class="plan" x="36" y="318" width="220" height="76" rx="12"/>
+  <text x="54" y="348" class="h">心跳 · 作息</text>
+  <text x="54" y="372" class="s">没人找她也会醒，夜里睡觉</text>
+
+  <rect class="plan" x="36" y="422" width="220" height="76" rx="12"/>
+  <text x="54" y="452" class="h">念头</text>
+  <text x="54" y="476" class="s">发呆久了冒出想法，想试试</text>
+
+  <path class="line" d="M256 252 H286 V300 H316" stroke="#5fe3d0" marker-end="url(#aT)"/>
+  <path class="line" d="M256 356 H286 V300" stroke="#8290b0" stroke-dasharray="5 4"/>
+  <path class="line" d="M256 460 H286 V356" stroke="#8290b0" stroke-dasharray="5 4"/>
+  <text x="261" y="296" class="m">叫醒</text>
+
+  <!-- 中间：一圈 -->
+  <circle cx="520" cy="300" r="112" fill="url(#glow)"/>
+  <circle cx="520" cy="300" r="130" fill="none" stroke="#2b3b5e"/>
+  <g class="line" stroke="#5fe3d0" stroke-width="2.2">
+    <path d="M393.3 270.8 A130 130 0 0 1 443.6 194.8" marker-end="url(#aT)"/>
+    <path d="M596.4 194.8 A130 130 0 0 1 646.7 270.8" marker-end="url(#aT)"/>
+    <path d="M646.7 329.2 A130 130 0 0 1 596.4 405.2" marker-end="url(#aT)"/>
+    <path d="M443.6 405.2 A130 130 0 0 1 393.3 329.2" marker-end="url(#aT)"/>
+  </g>
+  <circle cx="520" cy="300" r="58" fill="#0f1a30" stroke="#5fe3d0" stroke-opacity=".5"/>
+  <path d="M492 276 C496 262 520 257 534 270 L545 261 C546 266 548 270 552 272 C548 274 546 278 545 283 L534 276 C523 290 497 292 492 276 Z" fill="#5fe3d0"/>
+  <circle cx="502" cy="273" r="1.7" fill="#0f1a30"/>
+  <text x="520" y="314" class="h" text-anchor="middle" style="font-size: 18px">小鲸</text>
+  <text x="520" y="334" class="m" text-anchor="middle">唯一会话</text>
+
+  <rect class="box" x="320" y="277" width="140" height="46" rx="14" style="stroke: #5fe3d0"/>
+  <text x="390" y="297" class="h" text-anchor="middle" style="font-size: 14px">读取上下文</text>
+  <text x="390" y="314" class="m" text-anchor="middle">通知 · 记忆 · 生活</text>
+
+  <rect class="box" x="450" y="147" width="140" height="46" rx="14" style="stroke: #5fe3d0"/>
+  <text x="520" y="167" class="h" text-anchor="middle" style="font-size: 14px">思考与选择</text>
+  <text x="520" y="184" class="m" text-anchor="middle">说点什么，或者不说</text>
+
+  <rect class="box" x="580" y="277" width="140" height="46" rx="14" style="stroke: #5fe3d0"/>
+  <text x="650" y="297" class="h" text-anchor="middle" style="font-size: 14px">执行反应</text>
+  <text x="650" y="314" class="m" text-anchor="middle">调工具，过闸门</text>
+
+  <rect class="box" x="450" y="407" width="140" height="46" rx="14" style="stroke: #5fe3d0"/>
+  <text x="520" y="427" class="h" text-anchor="middle" style="font-size: 14px">更新记忆</text>
+  <text x="520" y="444" class="m" text-anchor="middle">记下发生了什么</text>
+
+  <!-- 下面：存下来的东西 -->
+  <path class="line" d="M520 455 V474" stroke="#a991fb" marker-end="url(#aM)"/>
+  <rect class="box" x="320" y="478" width="124" height="52" rx="10"/>
+  <text x="334" y="500" class="h" style="font-size: 14px">事件库</text>
+  <text x="334" y="519" class="m">永久 · 全文检索</text>
+  <rect class="box" x="458" y="478" width="124" height="52" rx="10"/>
+  <text x="472" y="500" class="h" style="font-size: 14px">会话存档</text>
+  <text x="472" y="519" class="m">只移出，不总结</text>
+  <rect class="plan" x="596" y="478" width="124" height="52" rx="10"/>
+  <text x="610" y="500" class="h" style="font-size: 14px">记忆库</text>
+  <text x="610" y="519" class="m">像背单词一样</text>
+
+  <!-- 右边：闸门和工具 -->
+  <path class="line" d="M720 300 H756" stroke="#f2c374" marker-end="url(#aA)"/>
+  <rect class="box" x="760" y="245" width="204" height="116" rx="12" style="stroke: #f08c6e"/>
+  <text x="778" y="272" class="h" style="fill: #f08c6e">权限闸门</text>
+  <text x="778" y="294" class="s">先 open 才能 send</text>
+  <text x="778" y="313" class="s">只在允许名单里说话</text>
+  <text x="778" y="332" class="s">发言频率有上限</text>
+  <text x="778" y="348" class="m">这些规则她自己改不了</text>
+
+  <rect class="box" x="760" y="380" width="204" height="118" rx="12"/>
+  <text x="778" y="406" class="h">她能用的工具</text>
+  <text x="778" y="430" class="mono" style="fill: #5fe3d0">open · send</text>
+  <text x="778" y="452" class="mono" style="fill: #f2c374">inbox · scroll · search</text>
+  <text x="778" y="474" class="mono" style="fill: #f2c374">rest · sleep · my_log</text>
+  <text x="778" y="490" class="m" style="font-size: 11px">青色：已做好　黄色：开发中</text>
+
+  <rect class="plan" x="760" y="110" width="204" height="110" rx="12"/>
+  <text x="778" y="138" class="h">子代理</text>
+  <text x="778" y="160" class="s">想做什么都行：查资料、</text>
+  <text x="778" y="179" class="s">刷视频、写小脚本</text>
+  <text x="778" y="204" class="m">关在沙盒里，权限不比她大</text>
+</svg>
