@@ -168,12 +168,11 @@ class Agent:
         while True:
             if self.gate.paused:
                 await self._wake.wait()
-                self._wake.clear()
-                continue
-            try:
-                await asyncio.wait_for(self._wake.wait(), self._seconds_until_due(time.time()))
-            except asyncio.TimeoutError:
-                pass
+            else:
+                try:
+                    await asyncio.wait_for(self._wake.wait(), self._seconds_until_due(time.time()))
+                except asyncio.TimeoutError:
+                    pass
             self._wake.clear()
             if self.gate.paused:
                 continue
