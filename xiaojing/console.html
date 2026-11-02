@@ -370,8 +370,33 @@ function render(s) {
   $('uptime').textContent = duration(s.uptime);
 }
 
+// 在桌面版（launcher.exe）的窗口里，口令直接找桌面程序要，不用人输
+let desktopTried = false;
+function waitBridge(ms) {
+  return new Promise((resolve) => {
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.token) return resolve(true);
+    const timer = setTimeout(() => resolve(false), ms);
+    window.addEventListener('pywebviewready', () => { clearTimeout(timer); resolve(true); }, { once: true });
+  });
+}
+async function desktopLogin() {
+  if (desktopTried) return false;
+  desktopTried = true;
+  if (!(await waitBridge(1500))) return false;
+  try {
+    const token = await window.pywebview.api.token();
+    const res = await fetch('/api/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }),
+    });
+    return res.ok;
+  } catch (e) {
+    return false;
+  }
+}
+
 async function api(path, opts = {}) {
-  const res = await fetch(path, { credentials: 'same-origin', ...opts });
+  let res = await fetch(path, { credentials: 'same-origin', ...opts });
+  if (res.status === 401 && await desktopLogin()) res = await fetch(path, { credentials: 'same-origin', ...opts });
   if (res.status === 401) { $('login').classList.add('show'); throw new Error('unauthorized'); }
   if (!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();

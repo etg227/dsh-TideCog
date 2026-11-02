@@ -134,6 +134,26 @@ python -m tests.demo_console
 
 打开 http://127.0.0.1:5319/ ，口令 `demo`。
 
+### 桌面版：launcher.exe
+
+不想挂着命令行窗口、也不想开浏览器的话，用桌面版：双击 `launcher.exe`，打开的窗口里就是管理台，自动登录，不用输口令。
+
+- 点关闭会缩到右下角托盘，她继续在后台转。单击托盘图标重新打开，右键可以暂停、继续、退出
+- 只能开一个，再双击会把已经开着的窗口叫出来
+- 启动失败（端口被占、配置写错）会弹窗说明；没设 key、名单为空这类问题会在托盘弹提示
+- `launcher.exe` 要和 `config.toml`、`persona.md`、`prompts/`、`data/` 放在同一个文件夹里
+- 需要 Windows 10 / 11，窗口用的是系统自带的 WebView2
+
+exe 不放在仓库里，自己打包（这几个包只有桌面版要用，核心程序还是不用装任何东西）：
+
+```
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements-desktop.txt
+.venv\Scripts\python scripts\build_launcher.py
+```
+
+打包好的 `launcher.exe` 会出现在项目根目录。不打包也能直接用桌面版：`.venv\Scripts\python -m xiaojing.desktop`。
+
 ### 跑测试
 
 ```
@@ -153,6 +173,8 @@ python -m unittest discover -s tests -t .
 | `xiaojing/store.py` | 事件库（SQLite + 全文检索）、收件箱、花费、管理台动态 |
 | `xiaojing/console.py`、`console.html` | 管理台 |
 | `xiaojing/httpserver.py` | 一个很小的异步 HTTP 服务器 |
+| `xiaojing/desktop.py`、`tray.py` | 桌面版：窗口、自动登录、托盘、只开一个 |
+| `scripts/` | 打包 launcher.exe、画图标 |
 | `prompts/system.md` | 运转规矩：她是怎么被叫醒、怎么转一圈的 |
 | `persona.md` | 人设：她是谁、怎么说话 |
 | `corpus/` | 分场景的语气参考模板 |

@@ -2,11 +2,22 @@
 from __future__ import annotations
 
 import os
+import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+
+def _root() -> Path:
+    """项目文件夹：config.toml、人设、data/ 都在这。打包成 exe 后就是 exe 所在的文件夹。"""
+    if override := os.environ.get("XIAOJING_ROOT"):
+        return Path(override).resolve()
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent
+
+
+ROOT = _root()
 
 
 @dataclass
